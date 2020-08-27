@@ -1,0 +1,14 @@
+# Misc R Stuff
+.RData
+.Rhistory
+
+# Environment
+.DS_Store
+
+# RMarkdown cache files
+**/*cache*
+**/*_files
+
+# Emacs files being worked on
+*~
+
