@@ -1,0 +1,176 @@
+---
+title: "STAT 685: Dr. Suojin Wang's Group"
+subtitle: |
+  | Modeling Seoul Bike Sharing Demand
+author: "Nam Tran, Bai Zou"
+date: "9/2/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r setupAnchor, cache=TRUE, echo=FALSE, message=FALSE}
+packages = c("tidyverse", "lubridate", "flipTime", "aTSA", "forecast", 
+             "reshape2", "GGally", "MASS")
+for(package in packages){
+  if(!require(package,character.only=TRUE,quietly=TRUE)){
+    install.packages(package,repos='http://cran.us.r-project.org')
+    require(package,character.only=TRUE,quietly=TRUE)
+  }
+}
+theme_update(plot.title = element_text(hjust = 0.5))
+
+# Loading the Data
+datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
+colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
+             "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
+             "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
+dat = read_csv(datPath, col_names = colNames, skip=1)
+
+# Setting up Factors
+dat$Seasons = as_factor(dat$Seasons)
+dat$Holiday = as_factor(dat$Holiday)
+dat$FunctionalDay = as_factor(dat$FunctionalDay)
+
+# Creating DateTime that incorporates both Date and Hours and dropping Hour
+dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+```
+
+# Data Exploration  
+
+## Qualtitative Variables
+
+* The plots shows more rented bike count in non-holidays than holidays except for summer.
+
+* If functional day is "no", there's no any bike rented.  
+
+* Day of week is not making significant difference in rented bike count.
+
+```{r qualtitativePlot, cache=TRUE, message=FALSE, fig.height=3, dependson='setupAnchor'}
+# adding day of time attributes
+dat$DayOfWeek <- weekdays(dat$Date)
+
+# plotting by Seasons and Holiday
+dat %>% 
+  ggplot(aes(x=Seasons, y=RentedBikeCount, fill=Holiday)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="Seasons", title="Rented Bike Count by Seasons and Holiday") 
+
+# plotting by Seasons and FunctionalDay
+dat %>% 
+  ggplot(aes(x=Seasons, y=RentedBikeCount, fill=FunctionalDay)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="Seasons", title="Rented Bike Count by Seasons and FunctionalDay")
+
+# plotting by Seasons and DayOfWeek
+dat %>% 
+  ggplot(aes(x=DayOfWeek, y=RentedBikeCount, fill=Seasons)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="DayOfWeek", title="Rented Bike Count by Seasons and DayOfWeek")
+```
+
+
+## Quantitative Variables
+
+* The covariance matrix shows Temp, Hour has relatively higher correlation with RentedBikeCount (>0.4).
+
+* DewPointTemp and SolarRadiation have correlation greater than 0.2. 
+
+* Temp and DewPointTemp are highly correlated (0.9). 
+
+* **No clear linear relationship can be identified between response variable and quantitative Variables**
+
+```{r quantitativePlot, cache=TRUE, message=FALSE, fig.height=3, dependson='setupAnchor'}
+quantitative_var = c("Hour", "Temp", "Humidity", "WindSpeed", "Visibility", "DewPointTemp", 
+             "SolarRadiation", "Rainfall", "Snowfall")
+
+# check covariance  
+cor_matrix = cor(dat[c("RentedBikeCount", quantitative_var)])
+cor_matrix2 = melt(cor_matrix)
+
+cor_matrix2 %>% 
+  ggplot(aes(x=Var1, y=Var2, fill=abs(value))) + 
+    geom_tile() +
+    theme(axis.text.x = element_text(angle = 90))
+
+cor_matrix = cor_matrix[order(abs(cor_matrix[,1]), decreasing=TRUE),]
+data.frame(cor_matrix[2:10, 1])
+```
+```{r quantitativePlot2, cache=TRUE, message=FALSE, fig.height=6, dependson='setupAnchor'}
+# scatter plot matrix
+select_var = rownames(cor_matrix)[1:5]
+p = ggpairs(dat[select_var], 
+            aes(colour = dat$Seasons, alpha = 0.2))
+show(p)
+```
+
+# Simple Linear Regression Fit
+
+* Hour is highly related to RentedBikeCount, but not linearly related. Using Hour as qualtitative variable improves 10% in R-squared. 
+
+* Adding second order for Temp doesn't bring significant improvement. 
+
+* Even with some modification on variables, the simple linear fit is still not very good with R-squared below 70%. The residual plots are showing 'v' shaped pattern that needs further investigation. 
+
+
+## Baseline
+
+```{r simpleFit, cache=TRUE, message=FALSE, fig.height=5, dependson='setupAnchor'}
+fit_dat1 = dat[, -1]
+# Fit the full model 
+full.model <- lm(RentedBikeCount ~., data = fit_dat1)
+# Stepwise regression model
+step.model <- stepAIC(full.model, direction = "both", 
+                      trace = FALSE)
+summary(step.model)
+
+# Residual plots
+par(mfrow = c(2, 2)) 
+plot(step.model) 
+```
+
+
+## Treat Hour as Qualtitative Variables
+
+```{r fit2, cache=TRUE, message=FALSE, fig.height=5, dependson='setupAnchor'}
+fit_dat2 = dat[, -1]
+fit_dat2$Hour = as.factor(fit_dat2$Hour)
+# Fit the full model 
+full.model2 <- lm(RentedBikeCount ~., data = fit_dat2)
+# Stepwise regression model
+step.model2 <- stepAIC(full.model2, direction = "both", 
+                      trace = FALSE)
+summary(step.model2)
+
+# Residual Plots
+par(mfrow = c(2, 2))  # Split the plotting panel into a 2 x 2 grid
+plot(step.model2)  # Plot the model information
+```
+
+## Adding 2nd Order of Temp
+
+```{r fit3, cache=TRUE, message=FALSE, fig.height=5, dependson='setupAnchor'}
+fit_dat3 = dat[, -1]
+fit_dat3$Hour = as.factor(fit_dat3$Hour)
+
+# mean temp
+fit_dat3$Temp2 = fit_dat3$Temp ^ 2
+
+# Fit the full model 
+full.model3 <- lm(RentedBikeCount ~., data = fit_dat3)
+# Stepwise regression model
+step.model3 <- stepAIC(full.model3, direction = "both", 
+                      trace = FALSE)
+summary(step.model3)
+
+# Residual Plots
+par(mfrow = c(2, 2))  # Split the plotting panel into a 2 x 2 grid
+plot(step.model3)  # Plot the model information
+```
+
