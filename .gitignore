@@ -12,3 +12,6 @@
 # Emacs files being worked on
 *~
 
+# Checkpoint stuff
+**/.ipynb_checkpoints
+
