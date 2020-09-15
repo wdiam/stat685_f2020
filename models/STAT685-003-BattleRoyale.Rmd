@@ -82,8 +82,8 @@ Further, we evaluated the estimators w.r.t. the notion of *lift curve.*
 More details in the appendix, but on a high-level:
 
 * Risk Estimate
-  * *Boosting* performed the best, followed by *Rf*, i.e., Random Forest. 
-  * All the non-linear methods out-performed the linear methods (*Linear Regression*, *ElasticNet*, *Refitted Lasso*).
+  * *Boosting* performed the best, followed by *Ensemble* variants, and then  *Rf*, i.e., Random Forest. 
+  * All the non-linear methods, except for *Decision Tree*,  out-performed the linear methods (*Linear Regression*, *ElasticNet*, *Refitted Lasso*).
 * Lift Curve
   * All estimators  had sane lift.
   
@@ -126,6 +126,7 @@ colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity",
 dat = read_csv(datPath, col_names = colNames, skip=1)
 
 # Setting up Factors
+dat$Hour = as_factor(dat$Hour)
 dat$Seasons = as_factor(dat$Seasons)
 dat$Holiday = as_factor(dat$Holiday)
 dat$FunctionalDay = as_factor(dat$FunctionalDay)
@@ -147,14 +148,14 @@ anchorDate = "2018/11/01"
 learnNdx = dat$Date < anchorDate
 
 yl = Ytot[learnNdx]
-yt = Ytot[-learnNdx]
+yt = Ytot[!learnNdx]
 xl = Xtot[learnNdx,]
-xt = Xtot[-learnNdx, ]
+xt = Xtot[!learnNdx, ]
 ```
 
 ### Identifying Qualitative Features
 
-```{r idQualFeatures}
+```{r idQualFeatures, cache=TRUE, dependson='partitioningData'}
 featureLevels = sapply(xl, function(x) { length(unique(x)) })
 head(sort(featureLevels), 5)
 ```
@@ -165,7 +166,7 @@ We say potentially `Hour`, since if we enter `Hour` as a quantitative feature, t
 
 ### Considering Missing Data
 
-```{r missingDataAnalysis}
+```{r missingDataAnalysis, cache=TRUE, dependson='partitioningData'}
 featureNA   = head(sort(sapply(xl, function(x) { sum(is.na(x) )}), decreasing = TRUE))
 obsNA       = head(sort(apply(xl, 1, function(x) { sum(is.na(x) )}), decreasing = TRUE))
 naSummaryDf = data.frame(featureNA=featureNA, obsNA=obsNA, row.names = 1:length(obsNA))
@@ -182,10 +183,10 @@ From this, it doesn't seem we have any "degenerate" columns that warrant feature
 # ---------------------------------------
 qualFeatures = which(featureLevels < 30)
 
-xlQuant = xl[,-qualFeatures]
-xlQual  = xl[, qualFeatures, drop = FALSE] %>% sapply(as.factor)
-xtQuant = xt[,-qualFeatures]
-xtQual  = xt[, qualFeatures, drop = FALSE] %>% sapply(as.factor)
+xlQuant = xl %>% select(-all_of(qualFeatures))
+xlQual  = xl %>% select(all_of(qualFeatures))
+xtQuant = xt %>% select(-all_of(qualFeatures))
+xtQual  = xt %>% select(all_of(qualFeatures))
 
 # ---------------------------------------
 # Center/Scale of Quantitative Features
