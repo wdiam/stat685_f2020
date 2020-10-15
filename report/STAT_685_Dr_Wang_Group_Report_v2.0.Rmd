@@ -439,7 +439,7 @@ Does mixture of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L
 
 \subsubsection{Example}
 
-```{r fitElasticNet, cache = TRUE, dependson = 'data_setup'}
+```{r fitElasticNet, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters"}
 set.seed(1)
 lassoGrid = expand.grid(
   lambda = c(0.001, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
@@ -463,13 +463,64 @@ The lowest cross-validation risk-estimate suggests that we should have minimal $
 \subsection{Refitted Lasso}
 
 \subsubsection{Theory}
+Note lasso does both model selection as well as implicitly does regularization, which can produce a solution that has too much bias. To overcome this but still attain the benefits of model selection, we can choose a $\lambda_{1SE}$, i.e., the "one-standard-error" $\lambda$ and then refit with unreguarlized linear regression.
+
 \subsubsection{Example}
+```{r fitRefittedLasso, cache = TRUE, dependson = 'data_setup'}
+set.seed(1)
+
+# Fitting with glmnet in general with alpha = 1.0
+glmnetOut     = cv.glmnet(x = xlFullMat, y = yl, alpha = 1.0)
+
+# We use lambda.min since lambda.1se will result in an empty active set!
+betaHatGlmnet = coef(glmnetOut, s = "lambda.min")
+refittedSIdx = which(as.vector(abs(betaHatGlmnet) > 1e-6)[-1])
+
+# Fitting an unregularized linear model
+refittedLassoOut = train(x = xlFullMat[,refittedSIdx], y = yl,
+                         method = "lm",
+                         trControl = trControl)
+```
+
+```{r fitRefittedLasso_yhat, cache = TRUE, dependson = 'fitRefittedLasso'}
+yhatRefitted = predict(refittedLassoOut, xlFullMat[,refittedSIdx])
+```
 
 \section{Non-Linear Methods}
 
-\subsection{MARS}
+\subsection{Multivariate Adaptive Regression Splines (MARS)}
+
 \subsubsection{Theory}
+
+
+
 \subsubsection{Example}
+```{r fitMARS, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for MARS"}
+set.seed(1)
+tuneGrid = expand.grid(
+  degree=1:3,                            # number of interactions
+  nprune = c(5,10,15,20,25,30, 50, 100)) # number of knots
+
+marsOut = train(x = xlFullMat, y = yl,
+                method="earth",
+                tuneGrid = tuneGrid,
+                trControl = trControl)
+plot(marsOut)
+```
+
+
+```{r fitMARS_vip, cache = TRUE, dependson = 'fitMARS', echo=FALSE, fig.cap="Variable Importance per MARS"}
+vip(marsOut, num_features = 10, geom="point", value="gcv") + ggtitle("GCV")
+```
+
+```{r fitMARS_yhat, cache = TRUE, dependson = 'fitMARS', echo=FALSE}
+yhatMARS = predict(marsOut$finalModel, xlFullMat)
+```
+
+
+
+
+
 
 \subsection{Decision Tree}
 \subsubsection{Theory}
