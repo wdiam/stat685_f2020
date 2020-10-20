@@ -383,11 +383,11 @@ As we can see here, the "best" model for the decission tree is to simply predict
 set.seed(1)
 tuneGrid = data.frame(splitrule="variance",
                       mtry = round(sqrt(ncol(xlFull))),
-                      min.node.size = c(5, 10))
+                      min.node.size = c(1, 2, 5, 10))
 rangerOut = train(x = xlFullMat, y = yl,
                   method = "ranger",
                   tuneGrid = tuneGrid,
-                  num.trees = 500,
+                  num.trees = 1000,
                   trControl = trControl)
 plot(rangerOut)
 
@@ -398,7 +398,8 @@ Not the most ideal residual plot but may be symptomatic of it being non-linear a
 
 ```{r boosting, cache = TRUE, dependson = 'createFinalX'}
 set.seed(1)
-tuneGrid = expand.grid("nrounds" = c(100, 150, 200, 250, 300, 350, 400, 450, 500, 750),
+tuneGrid = expand.grid("nrounds" = c(100, 150, 200, 250, 300, 350, 400, 450, 
+                                     500, 750),
                        "max_depth" = c(1, 2, 4, 6, 8),
                        "eta" = c(0.01),
                        "gamma" = 0,

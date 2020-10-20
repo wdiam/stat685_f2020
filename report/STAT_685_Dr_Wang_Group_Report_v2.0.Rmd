@@ -3,22 +3,72 @@ title: "STAT 685: Dr. Suojin Wang's Group"
 subtitle: |
   | Modeling Seoul Bike Sharing Demand
 author: "Nam Tran, Bai Zou"
-date: Fall 2020
+date: \today
+header-includes:
+   - \usepackage{fontspec}
+   - \setmainfont{Times New Roman}
+   - \usepackage{setspace}
+   - \onehalfspacing
+   - \usepackage{enumitem}
+   - \usepackage{float}
+   - \usepackage{subfig}
+   - \usepackage{url}
+   - \usepackage{listings}
+   - \usepackage{multirow}
+#   - \usepackage{biblatex}
+#   - \addbibresource{report.bib}
+   - \pagenumbering{gobble}
 output: 
   pdf_document:
-    toc: true
-    toc_depth: 3
-<<<<<<< HEAD
-=======
+    latex_engine: xelatex
+    number_sections: true
+    fig_caption: true
     includes:
-      in_header: preamble.tex        
->>>>>>> upstream/master
+      in_header: preamble.tex         
+documentclass: report
+fontsize: 12pt
+geometry: margin=1in 
+urlcolor: blue
 ---
 
-\newpage
-# 1. Intruduction 
+```{r packages, message=FALSE, echo=FALSE}
+rm(list=ls())
 
-## 1.1 Background
+require(tidyverse)
+require(dplyr)
+require(caret) 
+require(glmnet)
+require(doParallel)
+require(earth)
+require(vip)
+require(ranger)
+require(xgboost)
+require(RANN)
+require(lubridate)
+require(flipTime)
+require(e1071)
+
+theme_update(plot.title = element_text(hjust = 0.5))
+```
+
+\newpage
+
+\pagenumbering{roman}
+\setcounter{page}{2}
+\setcounter{tocdepth}{5}
+\setcounter{secnumdepth}{5}
+
+\tableofcontents
+\newpage
+\listoffigures
+\listoftables
+\newpage
+
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+
+\section{Background}
 
 Our data set is the "Seoul Bike Sharing Demand Data Set", which on a high level contains hourly data for bike usage as well as various covariates that might be useful, e.g., temperature. Further, it contains around one year of data.
 
@@ -36,11 +86,11 @@ Regarding motivation for the data set and its potential use, the following is ta
 
 The dataset contains weather information (Temperature, Humidity, Windspeed, Visibility, Dewpoint, Solar radiation, Snowfall, Rainfall), the number of bikes rented per hour and date information."
 
-## 1.2 Previous Work
+\section{Previous Work}
 
 There are two papers dealing with this data set explicitly. We're including both papers and in addition providing high level commentary on the paper and our concerns. 
 
-### 1.2.1 Paper 1: VE, Park, and Cho (2020, Computer Communications), Using Data Mining Techniques 
+\subsection{Paper 1: VE, Park, and Cho (2020, Computer Communications), Using Data Mining Techniques}
 
 **High Level:**
 
@@ -61,7 +111,7 @@ There are two papers dealing with this data set explicitly. We're including both
 * Didn't consider non-linear transforms of the data, which may not be that important given the usage of decision trees, but could have allowed plain linear regression to perform better.
 
 
-### 1.2.2 Paper 2: VE and Cho (2020, European Journal of Remote Sensing), A Rule-Based Model
+\subsection{Paper 2: VE and Cho (2020, European Journal of Remote Sensing), A Rule-Based Model}
 
 **High Level**
 
@@ -78,7 +128,7 @@ There are two papers dealing with this data set explicitly. We're including both
 * The last bullet point of high level thoughts. 
 
 
-## 1.3 Scope and Goal
+\section{Scope and Goal}
 
 Based on the description above, we break it into two potential business requirements here:
 
@@ -96,9 +146,9 @@ The scope in this study is to:
 
 
 \newpage
-# 2. Data Exploratory
+\chapter{Data Exploratory}
 
-## 2.1 Seoul Bike Sharing Demand Data
+\section{Seoul Bike Sharing Demand Data}
 * Downloaded the data from the [UCI Machine Learning Repo](https:/http://archive.ics.uci.edu/ml/datasets/Seoul+Bike+Sharing+Demand).
 * Contains 8760 measurements of number of bikes rented over 364.958 days.
 
@@ -119,14 +169,14 @@ Features of the data are,
 * `FunctionalDay`, a factor with levels {NoFunc(Non Functional Hours), Fun(Functional hours)}
 
 
-## 2.2 Time Series Data
+\section{Time Series Data}
 
 Fundamentally, our data is time-series data (Figure 2.1). As such, let $x_t$ be the time series we're working to model, i.e., Seoul's bike sharing data. 
 
 ![Caption for the picture.](./fig/2_time_series.png)
 *Figure 2.1 plotting over entire time period*
 
-### 2.2.1 Stationarity
+\subsection{Stationarity}
 
 It's arguable that there might be a strong seasonality component (less in winter more in summer), but that's hard to ascertain here since we only have one year's of data and only have one cycle. Further, there might be strong seasonality on an intraday basis (less in early morning and ramp up afterwards). If there was a strong seasonality component, we'd say our data isn't stationary, since on a first order basis, $E(x_t)$ will be dependent on $t$. Stationarity is important for a multitude of reasons, including *averaging being meaningful* and any *conditional expectation model we build is stable*.
 
@@ -141,7 +191,7 @@ We can test this directly using the Augmented Dickey-Fuller (ADF) Test (Figure 2
 From this, we can note that we're relatively stationarity up to lag 40 under the relaxed condition of having drift.
 
 
-### 2.2.2 ACF and PACF of $x_t$
+\subsection{ACF and PACF of $x_t$}
 
 We look at ACF and PACF of $y_t$ up to 100 and 50 lags (Figure 2.3), to see if any simple models come to mind. 
 
@@ -151,10 +201,10 @@ We look at ACF and PACF of $y_t$ up to 100 and 50 lags (Figure 2.3), to see if a
 Math theory states that an AR($p$) model would have a hard cutoff to zero in the PACF plot for $h > p$, and a MA($q$) model would have a hard cutoff to zero in the ACF plot for $h > q$. From the ACF plot and seeing statistically significant autocorrelations all the way out, a simple MA($q$) model will not suffice. Looking at the PACF plot, we see a strong "cut-off" at around lag 25, suggesting an AR($25$) model. Needless to say, an AR($25$) model isn't very palatable and doesn't seem parsimonious. As such, we seemingly can't get away with a simple MA($q$) nor a simple AR($p$) model.
 
 
-## 2.3 Feature Attributes
+\section{Feature Attributes}
 
 
-### 2.3.1 Hourly Trend
+\subsection{Hourly Trend}
 
 Plot below is showing the mean hourly demand by season (Figure 2.4). It is clear that winter season has much lower demand and summer season has relatively higher. Hourly trend is similar in each season with two peak time per day - 8 AM and 6 PM. The hour information could be used as either qualitative or quantitative since demand is not linearly related to hour. 
 
@@ -164,7 +214,7 @@ Plot below is showing the mean hourly demand by season (Figure 2.4). It is clear
 
 
 
-### 2.3.2 Qualitative Variables
+\subsection{Qualitative Variables}
 
 * The plots shows more rented bike count in non-holidays than holidays except for summer (Figure 2.5).
 
@@ -186,7 +236,7 @@ Plot below is showing the mean hourly demand by season (Figure 2.4). It is clear
 
 
 
-### 2.3.3 Quantitative Variables
+\subsection{Quantitative Variables}
 
 Figure 2.8 and Figure 2.9 are showing correlations between quantitative variables and demand:
 
@@ -206,7 +256,7 @@ Figure 2.8 and Figure 2.9 are showing correlations between quantitative variable
 *Figure 2.9 Top 4 Variable Correlation Matrix*
 
 
-## 2.4 Splitting Training and Testing Data
+\section{Splitting Training and Testing Data}
 
 The data set includes one year hourly bike rented count from Dec 2017 to Nov 2019. Splitting training and testing data in any anchor date will cause incomplete yearly distribution and information loss in training data. For example, there are only two days' observations for non-functional day before September 2018, which leaves little evidence for the model to identify the impact of Functional Day during training process if setting anchor date prior to September.
 
@@ -216,7 +266,7 @@ To minimize the information loss and maximize the training data size available, 
 
 * Preliminary model testing shows the best result when using Nov 2018 data for testing (Chapter 3).
 
-### 2.4.1 Weather Information Distribution
+\subsection{Weather Information Distribution}
 
 Figure 2.10 and 2.11 below are comparing distributions of some weather features for all observations and subset of observations before September 1, October 1 and November 1, 2018. In general, the last subset (setting anchor day at November 1, 2018) has a close enough distribution comparing the one year data set.
 
@@ -228,7 +278,7 @@ Figure 2.10 and 2.11 below are comparing distributions of some weather features 
 *Figure 2.11 Visibility and DewPointTemp Distribution*
 
 
-### 2.4.2 Function Day and Holiday Distribution
+\subsection{Function Day and Holiday Distribution}
 
 Tables below are showing number of observations by category in each data set. The last data set (setting anchor day at November 1, 2018) has the closest percentage comparing to the one year data. 
 
@@ -248,37 +298,246 @@ Tables below are showing number of observations by category in each data set. Th
 
 \newpage
 
-# 3. Estimation Methods Comparison
+\chapter{Estimation Methods Comparison}
 
-<<<<<<< HEAD
-=======
-## 3.1 Theoretical Methodology
+```{r data_setup, cache=TRUE, message=FALSE, echo=FALSE}
+set.seed(1)
 
-### 3.1.1 Data
+# Loading the Data
+datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
+colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
+             "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
+             "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
+dat = read_csv(datPath, col_names = colNames, skip=1)
+
+# Setting up Factors
+dat$Hour = as_factor(dat$Hour)
+dat$Seasons = as_factor(dat$Seasons)
+dat$Holiday = as_factor(dat$Holiday)
+dat$FunctionalDay = as_factor(dat$FunctionalDay)
+
+# Creating DateTime that incorporates both Date and Hours and dropping Hour
+dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+
+# We consider our "train" dataset all that we have, i.e., the total, for which we'll split later. 
+Xtot = dat %>% select(-RentedBikeCount, -Date)
+Ytot = dat %>% pull(RentedBikeCount)
+
+# Partitioning
+anchorDate = "2018/11/01"
+learnNdx = dat$Date < anchorDate
+
+yl = Ytot[learnNdx]
+yt = Ytot[!learnNdx]
+xl = Xtot[learnNdx,]
+xt = Xtot[!learnNdx, ]
+
+# Qualtitative Features
+featureLevels = sapply(xl, function(x) { length(unique(x)) })
+#head(sort(featureLevels), 5)
+
+# Missing Data
+featureNA   = head(sort(sapply(xl, function(x) { sum(is.na(x) )}), decreasing = TRUE))
+obsNA       = head(sort(apply(xl, 1, function(x) { sum(is.na(x) )}), decreasing = TRUE))
+naSummaryDf = data.frame(featureNA=featureNA, obsNA=obsNA, row.names = 1:length(obsNA))
+
+# Data Normalization
+# ---------------------------------------
+# Identifying qualitative features
+# ---------------------------------------
+qualFeatures = which(featureLevels < 30)
+
+xlQuant = xl %>% select(-all_of(qualFeatures))
+xlQual  = xl %>% select(all_of(qualFeatures))
+xtQuant = xt %>% select(-all_of(qualFeatures))
+xtQual  = xt %>% select(all_of(qualFeatures))
+
+# ---------------------------------------
+# Center/Scale of Quantitative Features
+# ---------------------------------------
+ppStandardization = preProcess(xlQuant, method=c("center", "scale"))
+xlQuantPost = predict(ppStandardization, xlQuant)
+xtQuantPost = predict(ppStandardization, xtQuant)
+
+# ---------------------------------------
+# Creating Dummary Variables 
+# ---------------------------------------
+ppDummy = dummyVars(~ ., data = xlQual, fullRank = TRUE)
+
+xlQualPost = predict(ppDummy, xlQual)
+xtQualPost = predict(ppDummy, xtQual)
+
+# ---------------------------------------
+# Getting a singular matrix now
+# ---------------------------------------
+xlFull = cbind(xlQuantPost, xlQualPost)
+xtFull = cbind(xtQuantPost, xtQualPost)
+
+xlFullMat = as.matrix(xlFull)
+xtFullMat = as.matrix(xtFull)
+
+# Correlation Amongst the Features
+corMat = cor(xlFull)
+absCorMat = abs(corMat)[upper.tri(corMat)]
+#round(quantile(absCorMat, c(0.5, 0.75, 0.9, 0.95, 0.99, 1)), 3)
+
+# Identifying outliers
+pcaOut = prcomp(xlFull, center=FALSE, scale=FALSE)
+#pcaOut$x[,1:2] %>% as.data.frame %>% ggplot() +
+#  geom_point(aes(x=PC1, y=PC2))
+
+# Setting up multi-cluster
+cl = makeCluster(6)
+registerDoParallel(cl)
+
+trControl = trainControl(method = "cv", number = 10)
+```
+
+
+\section{Theoretical Methodology}
+
+\subsection{Data}
 We have a collection of observations housed in a matrix $\bs{X}$ that is $\rdim{n}{p}$, i.e., $n$ observations and $p$ covariates. Further, for each observation, we have an associated supervisor value, for which all the supervisor values are housed in a column vector $\bs{y}$ that is $\rdim{n}{1}$, i.e., $n$ supervisor values for each of the $n$ associated observation. 
 
-### 3.1.2 Risk
+\subsection{Risk}
 We want to use training data and different algorithms to produce a $\hat{f}: \R^p \mapsto \R$, such that we can make predictions with $\hat{f}$, i.e., $\hat{f}(\bs{X}) = \hat{y}$, where $\bs{x} \in \R^p$ and $\hat{y} \in \R$, such that $\hat{y}$ is a \say{good} prediction of $y$, the unobserved supervisor. 
 
 One way to define \say{good} is to define it in the context of \say{loss}, specifically $\ell (\hat{y}, y)$. There are a multitude of loss functions to consider, but a \say{popular} loss for regression is the squared error loss, i.e., $\ell (\hat{y}, y) = (\hat{y} - y)^2$, where deviations from the true $y$ value is penalized in a squared fashion. 
 
 We define \say{good} to be the risk for $f$, namely $R(f) = \E \ell (f(\bs{X}), \bs{Y})$, noting that $\bs{X}, \bs{Y}$ are random variables \textbf{but} $R(f)$ isn't random, due to the expectation. In practice, we can use \say{test error} as an estimate for the risk. We can also use \say{cross-validation} as another estimate for the risk as well. 
 
-### 3.1.3 Identifying $f_*$ vs. $\hat{f}$
+\subsection{Identifying $f_*$ vs. $\hat{f}$}
 Let $f_* = \argminA_{f} R(f)$, i.e., $f_*$ has the lowest risk amongst the entire family of possible $f$. But, $f_*$ is theoretical, since we don't know the entire joint distribution of $(\bs{X}, \bs{Y})$. As such, $\hat{f}$ is our best guess of $f_*$. 
 
-### 3.1.4 Summary
+\subsection{Summary}
 In short, our goal is to consider different algorithms and make the best predictions we can, as defined by jointly by our risk estimate and the embedded loss metric, squared error loss $\ell (\hat{y}, y) = (\hat{y} - y)^2$ in our case. We will estimate risk in two different ways, cross-validation to help guide our hyper-parameter selection, and \say{test error} as the final hold-out to evaluate the \say{tuned} hyper-parameters. 
 
 
-## 3.2 Linear Methods
+\section{Linear Methods}
 
-## 3.3 Non-Linear Methods
->>>>>>> upstream/master
-TODO: report 004 
+\subsection{Linear Regression}
+
+\subsubsection{Theory}
+Let $\bs{\beta}^T, \bs{x}^T \in \R^p$, then we wish to model $y$ as $y = \bs{x}^T \bs{\beta} + \epsilon$, i.e., we want to project $y$ onto the subspace spanned by $\bs{X}$. In short, $\hat{\beta} = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2$.
+
+\subsubsection{Example}
+
+```{r fitLinearRegression, cache = TRUE, dependson = 'data_setup'}
+set.seed(1)
+linearOut = train(x = xlFullMat, y = yl,
+                  method = "lm",
+                  trControl = trControl)
+
+yhatLinear = predict(linearOut$finalModel, xlFull)
+```
+
+\subsection{Elastic Net}
+
+\subsubsection{Theory}
+
+Does mixture of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L_2$ regularization (penalty of $||\bs{\beta}||^2_2$). Then,  $\hat{\beta} = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2 + \lambda_1 ||\bs{\beta}||_1 + \lambda_2 ||\bs{\beta}||_2^2$. 
+
+\subsubsection{Example}
+
+```{r fitElasticNet, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters"}
+set.seed(1)
+lassoGrid = expand.grid(
+  lambda = c(0.001, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+  alpha = c(0.05, 0.5, 0.75, 1))
+elasticOut = train(x = xlFullMat, y = yl,
+                   method="glmnet",
+                   tuneGrid = lassoGrid,
+                   trControl = trControl)
+plot(elasticOut)
+```
+
+```{r fitElasticNet_yhat, cache=TRUE, dependson='fitElasticNet', echo=FALSE}
+# Refitting with 'core' glmnet
+glmnetOut     = glmnet(x = xlFullMat, y = yl, alpha = elasticOut$bestTune$alpha)
+betaHatGlmnet = coef(glmnetOut, s = elasticOut$bestTune$lambda)
+yhatGlmnet    = predict(glmnetOut, xlFullMat, s=elasticOut$bestTune$lambda)
+```
+
+The lowest cross-validation risk-estimate suggests that we should have minimal $L_1$ regularization ($\alpha=0.05$; we don't have $\alpha=0.0$, since it's unstable to fit using elastic net, but if that's what we want, we should just do LASSO instead). 
+
+\subsection{Refitted Lasso}
+
+\subsubsection{Theory}
+Note lasso does both model selection as well as implicitly does regularization, which can produce a solution that has too much bias. To overcome this but still attain the benefits of model selection, we can choose a $\lambda_{1SE}$, i.e., the "one-standard-error" $\lambda$ and then refit with unreguarlized linear regression.
+
+\subsubsection{Example}
+```{r fitRefittedLasso, cache = TRUE, dependson = 'data_setup'}
+set.seed(1)
+
+# Fitting with glmnet in general with alpha = 1.0
+glmnetOut     = cv.glmnet(x = xlFullMat, y = yl, alpha = 1.0)
+
+# We use lambda.min since lambda.1se will result in an empty active set!
+betaHatGlmnet = coef(glmnetOut, s = "lambda.min")
+refittedSIdx = which(as.vector(abs(betaHatGlmnet) > 1e-6)[-1])
+
+# Fitting an unregularized linear model
+refittedLassoOut = train(x = xlFullMat[,refittedSIdx], y = yl,
+                         method = "lm",
+                         trControl = trControl)
+```
+
+```{r fitRefittedLasso_yhat, cache = TRUE, dependson = 'fitRefittedLasso'}
+yhatRefitted = predict(refittedLassoOut, xlFullMat[,refittedSIdx])
+```
+
+\section{Non-Linear Methods}
+
+\subsection{Multivariate Adaptive Regression Splines (MARS)}
+
+\subsubsection{Theory}
+
+
+
+\subsubsection{Example}
+```{r fitMARS, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for MARS"}
+set.seed(1)
+tuneGrid = expand.grid(
+  degree=1:3,                            # number of interactions
+  nprune = c(5,10,15,20,25,30, 50, 100)) # number of knots
+
+marsOut = train(x = xlFullMat, y = yl,
+                method="earth",
+                tuneGrid = tuneGrid,
+                trControl = trControl)
+plot(marsOut)
+```
+
+
+```{r fitMARS_vip, cache = TRUE, dependson = 'fitMARS', echo=FALSE, fig.cap="Variable Importance per MARS"}
+vip(marsOut, num_features = 10, geom="point", value="gcv") + ggtitle("GCV")
+```
+
+```{r fitMARS_yhat, cache = TRUE, dependson = 'fitMARS', echo=FALSE}
+yhatMARS = predict(marsOut$finalModel, xlFullMat)
+```
+
+
+
+
+
+
+\subsection{Decision Tree}
+\subsubsection{Theory}
+\subsubsection{Example}
+
+\subsection{Random Forest}
+\subsubsection{Theory}
+\subsubsection{Example}
+
+\subsection{Boosting}
+\subsubsection{Theory}
+Fitting, in a stepwise fashion, a greedy nonparametric procedure. Meta-parameters are $\lambda$, the learning rate, and $B$ the number of steps. 
+
+\subsubsection{Example}
 
 \newpage
-# 4. Forecasting Model Comparison
+\chapter{Forecasting Model Comparison}
 
 There are three models considered to predict the next hour demand.(Assume the current day is X, and current hour is Y). 
 
@@ -304,20 +563,20 @@ Testing data setting:
 * Or randomly select m anchor hours for each anchor day selected above (if run time becomes a consideration).
 
 
-## 4.1 Model 1: One-time Prediction
+\section{Model 1: One-time Prediction}
 
 
-## 4.2 Model 2: Real-time Model Training
+\section{Model 2: Real-time Model Training}
 
 
-## 4.3 Model 3: Continuous Model Training
+\section{Model 3: Continuous Model Training}
 
 
-## 4.4 Model Comparison
+\section{Model Comparison}
 
 
 \newpage
-# 5. Result and Conclusion 
+\chapter{Result and Conclusion}
 
 
 
