@@ -3,6 +3,15 @@
 \usepackage{amsmath}
 \usepackage{dirtytalk}
 
+\usepackage{float}
+\let\origfigure\figure
+\let\endorigfigure\endfigure
+\renewenvironment{figure}[1][2] {
+    \expandafter\origfigure\expandafter[H]
+} {
+    \endorigfigure
+}
+
 \newcommand*{\QEDA}{\null\nobreak\hfill\ensuremath{\blacksquare}}%
 \newcommand*{\QEDB}{\null\nobreak\hfill\ensuremath{\square}}%
 \newcommand{\sumi}{\sum_{i=1}^n}
