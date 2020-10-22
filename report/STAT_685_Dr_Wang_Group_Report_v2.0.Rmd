@@ -10,13 +10,10 @@ header-includes:
    - \usepackage{setspace}
    - \onehalfspacing
    - \usepackage{enumitem}
-   - \usepackage{float}
    - \usepackage{subfig}
    - \usepackage{url}
    - \usepackage{listings}
    - \usepackage{multirow}
-#   - \usepackage{biblatex}
-#   - \addbibresource{report.bib}
    - \pagenumbering{gobble}
 output: 
   pdf_document:
@@ -24,7 +21,7 @@ output:
     number_sections: true
     fig_caption: true
     includes:
-      in_header: preamble.tex         
+      in_header: preamble.tex
 documentclass: report
 fontsize: 12pt
 geometry: margin=1in 
@@ -33,6 +30,8 @@ urlcolor: blue
 
 ```{r packages, message=FALSE, echo=FALSE}
 rm(list=ls())
+
+knitr::opts_chunk$set(echo = TRUE, fig.height = 3, out.extra = "")
 
 require(tidyverse)
 require(dplyr)
@@ -47,6 +46,9 @@ require(RANN)
 require(lubridate)
 require(flipTime)
 require(e1071)
+require(latex2exp)
+require(aTSA)
+require(forecast)
 
 theme_update(plot.title = element_text(hjust = 0.5))
 ```
@@ -67,6 +69,99 @@ theme_update(plot.title = element_text(hjust = 0.5))
 \pagenumbering{arabic}
 
 \chapter{Introduction}
+
+```{r data_setup, cache=TRUE, message=FALSE, echo=FALSE}
+set.seed(1)
+
+# Loading the Data
+datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
+colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
+             "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
+             "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
+dat = read_csv(datPath, col_names = colNames, skip=1)
+
+# Setting up Factors
+dat$Hour = as_factor(dat$Hour)
+dat$Seasons = as_factor(dat$Seasons)
+dat$Holiday = as_factor(dat$Holiday)
+dat$FunctionalDay = as_factor(dat$FunctionalDay)
+
+# Creating DateTime that incorporates both Date and Hours and dropping Hour
+dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+
+# We consider our "train" dataset all that we have, i.e., the total, for which we'll split later. 
+Xtot = dat %>% select(-RentedBikeCount, -Date)
+Ytot = dat %>% pull(RentedBikeCount)
+
+# Partitioning
+anchorDate = "2018/11/01"
+learnNdx = dat$Date < anchorDate
+
+yl = Ytot[learnNdx]
+yt = Ytot[!learnNdx]
+xl = Xtot[learnNdx,]
+xt = Xtot[!learnNdx, ]
+
+# Qualtitative Features
+featureLevels = sapply(xl, function(x) { length(unique(x)) })
+#head(sort(featureLevels), 5)
+
+# Missing Data
+featureNA   = head(sort(sapply(xl, function(x) { sum(is.na(x) )}), decreasing = TRUE))
+obsNA       = head(sort(apply(xl, 1, function(x) { sum(is.na(x) )}), decreasing = TRUE))
+naSummaryDf = data.frame(featureNA=featureNA, obsNA=obsNA, row.names = 1:length(obsNA))
+
+# Data Normalization
+# ---------------------------------------
+# Identifying qualitative features
+# ---------------------------------------
+qualFeatures = which(featureLevels < 30)
+
+xlQuant = xl %>% select(-all_of(qualFeatures))
+xlQual  = xl %>% select(all_of(qualFeatures))
+xtQuant = xt %>% select(-all_of(qualFeatures))
+xtQual  = xt %>% select(all_of(qualFeatures))
+
+# ---------------------------------------
+# Center/Scale of Quantitative Features
+# ---------------------------------------
+ppStandardization = preProcess(xlQuant, method=c("center", "scale"))
+xlQuantPost = predict(ppStandardization, xlQuant)
+xtQuantPost = predict(ppStandardization, xtQuant)
+
+# ---------------------------------------
+# Creating Dummary Variables 
+# ---------------------------------------
+ppDummy = dummyVars(~ ., data = xlQual, fullRank = TRUE)
+
+xlQualPost = predict(ppDummy, xlQual)
+xtQualPost = predict(ppDummy, xtQual)
+
+# ---------------------------------------
+# Getting a singular matrix now
+# ---------------------------------------
+xlFull = cbind(xlQuantPost, xlQualPost)
+xtFull = cbind(xtQuantPost, xtQualPost)
+
+xlFullMat = as.matrix(xlFull)
+xtFullMat = as.matrix(xtFull)
+
+# Correlation Amongst the Features
+corMat = cor(xlFull)
+absCorMat = abs(corMat)[upper.tri(corMat)]
+#round(quantile(absCorMat, c(0.5, 0.75, 0.9, 0.95, 0.99, 1)), 3)
+
+# Identifying outliers
+pcaOut = prcomp(xlFull, center=FALSE, scale=FALSE)
+#pcaOut$x[,1:2] %>% as.data.frame %>% ggplot() +
+#  geom_point(aes(x=PC1, y=PC2))
+
+# Setting up multi-cluster
+cl = makeCluster(6)
+registerDoParallel(cl)
+
+trControl = trainControl(method = "cv", number = 10)
+```
 
 \section{Background}
 
@@ -171,34 +266,61 @@ Features of the data are,
 
 \section{Time Series Data}
 
-Fundamentally, our data is time-series data (Figure 2.1). As such, let $x_t$ be the time series we're working to model, i.e., Seoul's bike sharing data. 
+Fundamentally, our data is time-series data (Figure 2.1). As such, let $y_t$ be the time series we're working to model, i.e., Seoul's bike sharing data. 
 
-![Caption for the picture.](./fig/2_time_series.png)
-*Figure 2.1 plotting over entire time period*
+```{r yt_data_plot, cache = TRUE, dependson = 'data_setup', fig.cap="Hourly Rented Bike Count Over Entire Time Period", echo=FALSE}
+dat %>% 
+  ggplot(aes(x=Date, y=RentedBikeCount)) +
+  geom_line() +
+  labs(y="Rented Biked Count", "Date Time (Hour)")
+```
 
 \subsection{Stationarity}
 
-It's arguable that there might be a strong seasonality component (less in winter more in summer), but that's hard to ascertain here since we only have one year's of data and only have one cycle. Further, there might be strong seasonality on an intraday basis (less in early morning and ramp up afterwards). If there was a strong seasonality component, we'd say our data isn't stationary, since on a first order basis, $E(x_t)$ will be dependent on $t$. Stationarity is important for a multitude of reasons, including *averaging being meaningful* and any *conditional expectation model we build is stable*.
+It's arguable that there might be a strong seasonality component (less in winter more in summer), but that's hard to ascertain here since we only have one year's of data and only have one cycle. Further, there might be strong seasonality on an intraday basis (less in early morning and ramp up afterwards). If there was a strong seasonality component, we'd say our data isn't stationary, since on a first order basis, $E(y_t)$ will be dependent on $t$. Stationarity is important for a multitude of reasons, including *averaging being meaningful* and any *conditional expectation model we build is stable*.
 
 Note, we can still incorporate terms to make a time series stationary, e.g., trend-stationary. 
 
-We can test this directly using the Augmented Dickey-Fuller (ADF) Test (Figure 2.2), which intuitively tests for the presence of a unit root, which implies non-stationarity. $H_0$ for ADF is that $x_t$ is non-stationary, and $H_a$ is that $x_t$ is stationary. Note there are different types of stationarity, e.g., in presence of drift ($\mu$) or linear trend ($\beta t$). 
+We can test this directly using the Augmented Dickey-Fuller (ADF) Test, which intuitively tests for the presence of a unit root, which implies non-stationarity. $H_0$ for ADF is that $y_t$ is non-stationary, and $H_a$ is that $y_t$ is stationary. Note there are different types of stationarity, e.g., in presence of drift ($\mu$) or linear trend ($\beta t$). 
 
-![Caption for the picture.](./fig/2_test_stationary.png)
+```{r yt_adf_plot, cache = TRUE, dependson = 'data_setup', fig.cap="Augmented Dickey Fuller (ADF) Test for Stationarity", echo=FALSE}
+zz = adf.test(dat$RentedBikeCount, 100, output=FALSE)
+adf1 = zz[[1]] %>% data.frame %>% mutate(Type="No Drift, No Trend")
+adf2 = zz[[2]] %>% data.frame %>% mutate(Type="With Drift, No Trend")
+adf3 = zz[[3]] %>% data.frame %>% mutate(Type="With Drift, With Trend")
+adfDat = bind_rows(adf1, adf2, adf3)
 
-*Figure 2.2 stationarity test*
+adfDat %>% ggplot(aes(x=lag, y=p.value, color=Type)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept=0.05, linetype="dashed", color = "black") +
+  labs(x="Lag", y="p-value")
+```
 
-From this, we can note that we're relatively stationarity up to lag 40 under the relaxed condition of having drift.
+Note that each lag, i.e., tick mark, in the ADF figure represents an hour. Under the most relaxed condition of no drift and no trend, then we can see that we start getting significant non-stationarity post lag 48, which represents approximately two days past. While this can be handled by differencing, as suggested by the stationarity for more restrictive conditions, this can also suggest that we can include lagged covariates of the response, i.e., lagged $y_t$, which we will ascertain next when looking at the auto-correlation function (ACF) plots and the partial auto-correlation function (PACF) plots. 
 
 
-\subsection{ACF and PACF of $x_t$}
+\subsection{Autocorrelation and Partial Autocorrelation of Rented Biked Count, $y_t$}
 
-We look at ACF and PACF of $y_t$ up to 100 and 50 lags (Figure 2.3), to see if any simple models come to mind. 
+The ACF looks at correlation of $y_t$ with lagged versions of itself, e.g., $y_{t-k}$. The PACF differs in that it looks at correlation of $y_t$ with lagged versions of itself, e.g., $y_{t-k}$, while controlling for the intermediary lags, e.g., $\tilde{\bs{y}} = \{y_{t-1}, y_{t-2}, \dots, y_{t-k+1}\}$. From a practical standpoint, when considering PACF, we regress $y_t$ on $\tilde{\bs{y}}$ and $y_{t-k}$ on $\tilde{\bs{y}}$, and then look at the correlation of their respective residuals. 
 
-![Caption for the picture.](./fig/2_acf_pacf.png)
-*Figure 2.3 ACF and PACF*
+Here, We look at the ACF and PACF of $y_t$ up to 100 and 50 lags.
+
+```{r yt_acf_pacf, cache = TRUE, dependson = 'data_setup', fig.cap="Autocorrelation and Partial Autocorrelation of Rented Bike Count, i.e., $y_t$", echo=FALSE}
+selfACF   = ggAcf(dat$RentedBikeCount, lag.max = 100) + labs(title=TeX("$y_t$"))
+selfPACF  = ggPacf(dat$RentedBikeCount, lag.max = 100) + labs(title=TeX("$y_t$"))
+selfACF2  = ggAcf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+selfPACF2 = ggPacf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+
+plots = list(selfACF, selfPACF, selfACF2, selfPACF2)
+gridExtra::grid.arrange(grobs = plots, ncol=2)
+```
+
+
 
 Math theory states that an AR($p$) model would have a hard cutoff to zero in the PACF plot for $h > p$, and a MA($q$) model would have a hard cutoff to zero in the ACF plot for $h > q$. From the ACF plot and seeing statistically significant autocorrelations all the way out, a simple MA($q$) model will not suffice. Looking at the PACF plot, we see a strong "cut-off" at around lag 25, suggesting an AR($25$) model. Needless to say, an AR($25$) model isn't very palatable and doesn't seem parsimonious. As such, we seemingly can't get away with a simple MA($q$) nor a simple AR($p$) model.
+
+While we can't get a simple AR($p) or MA($q$) model, we can still use the results of the ACF and PACF plots to suggest that we need lagged values of our supervisor as additional covariates.
 
 
 \section{Feature Attributes}
@@ -206,11 +328,20 @@ Math theory states that an AR($p$) model would have a hard cutoff to zero in the
 
 \subsection{Hourly Trend}
 
-Plot below is showing the mean hourly demand by season (Figure 2.4). It is clear that winter season has much lower demand and summer season has relatively higher. Hourly trend is similar in each season with two peak time per day - 8 AM and 6 PM. The hour information could be used as either qualitative or quantitative since demand is not linearly related to hour. 
+Plot below is showing the mean hourly demand by season. It is clear that winter season has much lower demand and summer season has relatively higher demand. Hourly trend is similar in each season with two peak time per day - 8 AM and 6 PM. The hour information could be used as either qualitative or quantitative since demand is not linearly related to hour. 
+
+```{r yt_hourly_by_seasons, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Hour Grouped by Seasons", echo=FALSE}
+# plotting "effect" of seasons
+dat %>% 
+  mutate(Hour = hour(Date)) %>%
+  group_by(Seasons, Hour) %>%
+  summarise(MeanRentedBikeCount = mean(RentedBikeCount), .groups="drop") %>%
+  ggplot(aes(x=Hour, y=MeanRentedBikeCount, color=Seasons)) +
+  geom_line() +
+  labs(y="Mean Rented Bike Count", x="Hour")  
+```
 
 
-![Caption for the picture.](./fig/2_hourly_seasonly.png)
-*Figure 2.4 Demand by Hour and Season*
 
 
 
@@ -222,18 +353,32 @@ Plot below is showing the mean hourly demand by season (Figure 2.4). It is clear
 
 * Day of week is not making significant difference in rented bike count (Figure 2.7).
 
+```{r yt_by_seasons_by_holiday, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Season Grouped by Holiday", echo=FALSE}
+dat %>% 
+  ggplot(aes(x=Seasons, y=RentedBikeCount, fill=Holiday)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="Seasons") 
+```
 
-![Caption for the picture.](./fig/2_by_season_holiday.png)
-*Figure 2.5 Demand by Holiday and Season*
+```{r yt_by_seasons_by_functionalday, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Season Grouped by Functional Day", echo=FALSE}
+dat %>% 
+  ggplot(aes(x=Seasons, y=RentedBikeCount, fill=FunctionalDay)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="Seasons")
+```
 
 
-![Caption for the picture.](./fig/2_by_season_funcionday.png)
-*Figure 2.6 Demand by Seasons and FunctionalDay*
+```{r yt_by_dayofweek_by_seasonsy, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Day of Week Grouped by Season", echo=FALSE}
+dat$DayOfWeek <- weekdays(dat$Date)
 
-
-![Caption for the picture.](./fig/2_by_season_weekday.png)
-*Figure 2.7 Demand by by Seasons and DayOfWeek*
-
+dat %>% 
+  ggplot(aes(x=DayOfWeek, y=RentedBikeCount, fill=Seasons)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="DayOfWeek")
+```
 
 
 \subsection{Quantitative Variables}
@@ -270,11 +415,11 @@ To minimize the information loss and maximize the training data size available, 
 
 Figure 2.10 and 2.11 below are comparing distributions of some weather features for all observations and subset of observations before September 1, October 1 and November 1, 2018. In general, the last subset (setting anchor day at November 1, 2018) has a close enough distribution comparing the one year data set.
 
-![Caption for the picture.](./fig/2_feature_dist_1.png)
+![Caption for the picture 1.](./fig/2_feature_dist_1.png)
 *Figure 2.10 Temp, Humidity and WindSpeed Distribution*
 
 
-![Caption for the picture.](./fig/2_feature_dist_2.png)
+![Caption for the picture 2.](./fig/2_feature_dist_2.png)
 *Figure 2.11 Visibility and DewPointTemp Distribution*
 
 
@@ -300,100 +445,6 @@ Tables below are showing number of observations by category in each data set. Th
 
 \chapter{Estimation Methods Comparison}
 
-```{r data_setup, cache=TRUE, message=FALSE, echo=FALSE}
-set.seed(1)
-
-# Loading the Data
-datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
-colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
-             "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
-             "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
-dat = read_csv(datPath, col_names = colNames, skip=1)
-
-# Setting up Factors
-dat$Hour = as_factor(dat$Hour)
-dat$Seasons = as_factor(dat$Seasons)
-dat$Holiday = as_factor(dat$Holiday)
-dat$FunctionalDay = as_factor(dat$FunctionalDay)
-
-# Creating DateTime that incorporates both Date and Hours and dropping Hour
-dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
-
-# We consider our "train" dataset all that we have, i.e., the total, for which we'll split later. 
-Xtot = dat %>% select(-RentedBikeCount, -Date)
-Ytot = dat %>% pull(RentedBikeCount)
-
-# Partitioning
-anchorDate = "2018/11/01"
-learnNdx = dat$Date < anchorDate
-
-yl = Ytot[learnNdx]
-yt = Ytot[!learnNdx]
-xl = Xtot[learnNdx,]
-xt = Xtot[!learnNdx, ]
-
-# Qualtitative Features
-featureLevels = sapply(xl, function(x) { length(unique(x)) })
-#head(sort(featureLevels), 5)
-
-# Missing Data
-featureNA   = head(sort(sapply(xl, function(x) { sum(is.na(x) )}), decreasing = TRUE))
-obsNA       = head(sort(apply(xl, 1, function(x) { sum(is.na(x) )}), decreasing = TRUE))
-naSummaryDf = data.frame(featureNA=featureNA, obsNA=obsNA, row.names = 1:length(obsNA))
-
-# Data Normalization
-# ---------------------------------------
-# Identifying qualitative features
-# ---------------------------------------
-qualFeatures = which(featureLevels < 30)
-
-xlQuant = xl %>% select(-all_of(qualFeatures))
-xlQual  = xl %>% select(all_of(qualFeatures))
-xtQuant = xt %>% select(-all_of(qualFeatures))
-xtQual  = xt %>% select(all_of(qualFeatures))
-
-# ---------------------------------------
-# Center/Scale of Quantitative Features
-# ---------------------------------------
-ppStandardization = preProcess(xlQuant, method=c("center", "scale"))
-xlQuantPost = predict(ppStandardization, xlQuant)
-xtQuantPost = predict(ppStandardization, xtQuant)
-
-# ---------------------------------------
-# Creating Dummary Variables 
-# ---------------------------------------
-ppDummy = dummyVars(~ ., data = xlQual, fullRank = TRUE)
-
-xlQualPost = predict(ppDummy, xlQual)
-xtQualPost = predict(ppDummy, xtQual)
-
-# ---------------------------------------
-# Getting a singular matrix now
-# ---------------------------------------
-xlFull = cbind(xlQuantPost, xlQualPost)
-xtFull = cbind(xtQuantPost, xtQualPost)
-
-xlFullMat = as.matrix(xlFull)
-xtFullMat = as.matrix(xtFull)
-
-# Correlation Amongst the Features
-corMat = cor(xlFull)
-absCorMat = abs(corMat)[upper.tri(corMat)]
-#round(quantile(absCorMat, c(0.5, 0.75, 0.9, 0.95, 0.99, 1)), 3)
-
-# Identifying outliers
-pcaOut = prcomp(xlFull, center=FALSE, scale=FALSE)
-#pcaOut$x[,1:2] %>% as.data.frame %>% ggplot() +
-#  geom_point(aes(x=PC1, y=PC2))
-
-# Setting up multi-cluster
-cl = makeCluster(6)
-registerDoParallel(cl)
-
-trControl = trainControl(method = "cv", number = 10)
-```
-
-
 \section{Theoretical Methodology}
 
 \subsection{Data}
@@ -417,33 +468,43 @@ In short, our goal is to consider different algorithms and make the best predict
 
 \subsection{Linear Regression}
 
-\subsubsection{Theory}
 Let $\bs{\beta}^T, \bs{x}^T \in \R^p$, then we wish to model $y$ as $y = \bs{x}^T \bs{\beta} + \epsilon$, i.e., we want to project $y$ onto the subspace spanned by $\bs{X}$. In short, $\hat{\beta} = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2$.
 
-\subsubsection{Example}
-
-```{r fitLinearRegression, cache = TRUE, dependson = 'data_setup'}
+```{r fitLinearRegression, cache = TRUE, dependson = 'data_setup', echo=FALSE}
 set.seed(1)
 linearOut = train(x = xlFullMat, y = yl,
                   method = "lm",
                   trControl = trControl)
 
-yhatLinear = predict(linearOut$finalModel, xlFull)
+yhatLinear = predict(linearOut$finalModel, xlFull) %>%
+  as.numeric()
 ```
+
+```{r fitLinearRegression_residual_plot, fig.cap="Residual Plot for Linear Regression", cache=TRUE, dependson='fitLinearRegression', echo=FALSE, fig.height=3}
+data.frame(e=yl - yhatLinear, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+
+From this residual plot, it suggests that multiple linear regression isn't appropriate for this data set. Namely, in an idealized setting, we wouldn't notice any distinct patterns in the residuals, but in this case, we see a clear increase in residual values as our estimate $\hat{y}$ gets larger. This may be due to the supervisor being count data, for which a Poisson regression or applying a square-root transform to the supervisor. 
+
+To be more specific, for us to do inference using Linear Regression, independent of prediction, we need to have $\E{\epsilon} = 0$, $\V(\epsilon)$, and $\text{Cov}(\epsilon_i, \epsilon_j) = 0$, for which all three conditions aren't satisfied. This isn't a problem specifically for us, since we care about prediction, but it does suggest model misspecification. 
+
 
 \subsection{Elastic Net}
 
-\subsubsection{Theory}
+Elastic Net is an extension of Linear Regression, where we do a mixture of both of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L_2$ regularization (penalty of $||\bs{\beta}||^2_2$). Then,  $\hat{\beta}(\lambda_1, \lambda_2) = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2 + \lambda_1 ||\bs{\beta}||_1 + \lambda_2 ||\bs{\beta}||_2^2$. 
 
-Does mixture of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L_2$ regularization (penalty of $||\bs{\beta}||^2_2$). Then,  $\hat{\beta} = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2 + \lambda_1 ||\bs{\beta}||_1 + \lambda_2 ||\bs{\beta}||_2^2$. 
+Note most parameterizations of Elastic Net instead of having separate $\lambda_1$ and $\lambda_2$ have a singular $\lambda$ and a "mixing ratio" between $L_1$ and $L_2$ regularization in the form of $\alpha$. Then, $\hat{\beta}(\lambda, \alpha) = \argminA_\beta \big( ||\bs{y} - \bs{X}\bs{\beta}||^2_2 + \lambda ((1-\alpha)||\bs{\beta}||^2_2 + \alpha ||\bs{\beta}||_1) \big)$. In this parameterization, note that $\alpha=1$ results in LASSO, which has only $L_1$ regularization , and that $\alpha=0$ results in Ridge Regression, which has only $\L_2$ regularization. 
 
-\subsubsection{Example}
+An open question remains though on how to choose $\alpha$, the mixture between $L_1$ and $L_2$ regularization, and $\lambda$, how much penalty to impose. For this, we can use $k$-fold cross-validation risk estimates. Namely, for a particular set of hyper-parameters we wish to consider, we can take our training data and split it into $k$ chunks, and for each chunk, we hold it out as the "test" data and learn on the remaining $k-1$ chunks (using our chosen hyper-parameters) and then evaluate on the $k^{\text{th}}$ holdout using, for example, squared error, i.e., $\sumi (y_i) - \hat{y}_i)^2$. We would then average over all $k$ risk estimatess and come up with a singular risk estimate, i.e., the cross-validation risk estimate for the hyper-parameters we used. Then, for the entire set of hyper-parameters, we'd have an associated cross-validation risk-estimate and consequently would choose the one with the lowest risk-estimate, which we're trying to minimmize.
 
-```{r fitElasticNet, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters"}
+```{r fitElasticNet, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters", echo=FALSE}
 set.seed(1)
 lassoGrid = expand.grid(
-  lambda = c(0.001, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
-  alpha = c(0.05, 0.5, 0.75, 1))
+  lambda = seq(0, 1.25, length.out = 20),
+  alpha = c(0.01, 0.05, 0.25, 0.5, 0.75, 1))
 elasticOut = train(x = xlFullMat, y = yl,
                    method="glmnet",
                    tuneGrid = lassoGrid,
@@ -451,14 +512,41 @@ elasticOut = train(x = xlFullMat, y = yl,
 plot(elasticOut)
 ```
 
-```{r fitElasticNet_yhat, cache=TRUE, dependson='fitElasticNet', echo=FALSE}
+Looking at the cross-validation risk estimates, the minimal test error is at $\hat{\alpha} = `r elasticOut$bestTune$alpha`$ and $\hat{\lambda} = `r elasticOut$bestTune$lambda`$, suggesting that we prefer minimal $L_1$ regularization ($\alpha = 0$ is strictly $L_2$ reguarlization). 
+
+Note we've run into a boundary condition, i.e., we don't know if having $\hat{lambda} > `r elasticOut$bestTune$lambda`$ will result in an even lower risk estimate. As such, we expand past the boundary and see if we can get a lower risk estimate. 
+
+```{r fitElasticNet2, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters Past Boundary Condition", echo=FALSE}
+set.seed(1)
+lassoGrid = expand.grid(
+  lambda = seq(0.75, 5, length.out = 20),
+  alpha = c(0.01))
+elasticOut = train(x = xlFullMat, y = yl,
+                   method="glmnet",
+                   tuneGrid = lassoGrid,
+                   trControl = trControl)
+plot(elasticOut)
+```
+
+Thus, the hyper-parameters that minimize the cross-validation risk estimate is  $\hat{\alpha} = `r elasticOut$bestTune$alpha`$ and $\hat{\lambda} = `r elasticOut$bestTune$lambda`$.
+
+
+```{r fitElasticNet2_yhat, cache=TRUE, dependson='fitElasticNet2', echo=FALSE}
 # Refitting with 'core' glmnet
 glmnetOut     = glmnet(x = xlFullMat, y = yl, alpha = elasticOut$bestTune$alpha)
 betaHatGlmnet = coef(glmnetOut, s = elasticOut$bestTune$lambda)
-yhatGlmnet    = predict(glmnetOut, xlFullMat, s=elasticOut$bestTune$lambda)
+yhatGlmnet    = predict(glmnetOut, xlFullMat, s=elasticOut$bestTune$lambda) %>%
+  as.numeric()
 ```
 
-The lowest cross-validation risk-estimate suggests that we should have minimal $L_1$ regularization ($\alpha=0.05$; we don't have $\alpha=0.0$, since it's unstable to fit using elastic net, but if that's what we want, we should just do LASSO instead). 
+```{r fitElasticNet2_residual_plot, cache=TRUE, dependson='fitElasticNet2', echo=FALSE, fig.height=3, fig.cap="Residual Plot for Elastic Net"}
+data.frame(e = yl-yhatGlmnet, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+
+Not surprisingly, the residual plot for Elastic Net shows similar behavior to Linear Regression, suggesting that Elastic Net isn't an appropriate model and further confirmation the linear models aren't appropriate for the problem we have. 
 
 \subsection{Refitted Lasso}
 
@@ -490,45 +578,13 @@ yhatRefitted = predict(refittedLassoOut, xlFullMat[,refittedSIdx])
 
 \subsection{Multivariate Adaptive Regression Splines (MARS)}
 
-\subsubsection{Theory}
-
-
-
-\subsubsection{Example}
-```{r fitMARS, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for MARS"}
-set.seed(1)
-tuneGrid = expand.grid(
-  degree=1:3,                            # number of interactions
-  nprune = c(5,10,15,20,25,30, 50, 100)) # number of knots
-
-marsOut = train(x = xlFullMat, y = yl,
-                method="earth",
-                tuneGrid = tuneGrid,
-                trControl = trControl)
-plot(marsOut)
-```
-
-
-```{r fitMARS_vip, cache = TRUE, dependson = 'fitMARS', echo=FALSE, fig.cap="Variable Importance per MARS"}
-vip(marsOut, num_features = 10, geom="point", value="gcv") + ggtitle("GCV")
-```
-
-```{r fitMARS_yhat, cache = TRUE, dependson = 'fitMARS', echo=FALSE}
-yhatMARS = predict(marsOut$finalModel, xlFullMat)
-```
-
-
 
 
 
 
 \subsection{Decision Tree}
-\subsubsection{Theory}
-\subsubsection{Example}
 
 \subsection{Random Forest}
-\subsubsection{Theory}
-\subsubsection{Example}
 
 \subsection{Boosting}
 \subsubsection{Theory}
@@ -577,8 +633,6 @@ Testing data setting:
 
 \newpage
 \chapter{Result and Conclusion}
-
-
 
 
 
