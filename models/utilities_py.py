@@ -4,6 +4,7 @@ common functions
 import os
 import pandas as pd
 import numpy as np
+from scipy.stats.contingency import margins
 
 
 def load_data():
@@ -122,10 +123,17 @@ def get_default_date_list(data):
     return date_list
 
 
-def compare_table(res_list):
+def compare_table(res_dict):
     res_com_df = None
-    for idx, res_sum in enumerate(res_list):
+    for k, res_sum in res_dict.items():
         if res_com_df is None:
             res_com_df = pd.DataFrame(index=list(res_sum.keys()))
-        res_com_df[f"Mod_{idx+1}"] = [np.mean(v) if isinstance(v, list) else v for v in res_sum.values()]
+        res_com_df[k] = [np.mean(v) if isinstance(v, list) else v for v in res_sum.values()]
     return res_com_df
+
+
+def cal_std_resid(observed, expected):
+    # Calculate Standardized Residuals
+    res = expected - observed
+    re_sd = np.std(res)
+    return res / re_sd

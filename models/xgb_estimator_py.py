@@ -225,14 +225,16 @@ if __name__ == '__main__':
     date_list = get_default_date_list(dat)
     hour_list = list(range(24))
     dat_hourly = dat.copy()
-    dat_hourly = add_past_hour_demand(dat_hourly, [1, 2, 24, 24 * 7])
+    # dat_hourly = add_past_hour_demand(dat_hourly, [24, 48, 24 * 7])
     print(dat_hourly.head(2))
-    sum_t_hourly_2, p_df_hourly_2 = run_repeat_forecast(dat_hourly, date_list, hour_list)
+    sum_t_hourly_2, p_df_hourly_2 = run_repeat_forecast(dat_hourly, date_list, None)
 
     # save result
     project_path = os.path.abspath(os.path.join(os.path.dirname(os.getcwd()), '.'))
-    p_df_hourly_2.to_csv(os.path.join(project_path, 'data/output_hourly_lag.csv'), index=True)
+    p_df_hourly_2.to_csv(os.path.join(project_path, 'data/output_pred_daily_no_cor.csv'), index=True)
     import json
 
-    with open(os.path.join(project_path, "data/output_hourly_no_lag_summary.json"), 'w') as fp:
+    with open(os.path.join(project_path, "data/output_daily_no_cor.json"), 'w') as fp:
         json.dump(sum_t_hourly_2, fp)
+
+    printout_result(sum_t_hourly_2)
