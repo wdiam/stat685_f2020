@@ -15,3 +15,10 @@
 # Checkpoint stuff
 **/.ipynb_checkpoints
 
+# ignore temp output data
+.idea/
+/data/output*
+**/.ipynb
+/models/STAT685-001-*
+/models/STAT685-002-*
+/models/STAT685-004-*

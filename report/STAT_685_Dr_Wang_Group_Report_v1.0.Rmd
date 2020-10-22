@@ -8,8 +8,11 @@ output:
   pdf_document:
     toc: true
     toc_depth: 3
+<<<<<<< HEAD
+=======
     includes:
       in_header: preamble.tex        
+>>>>>>> upstream/master
 ---
 
 \newpage
@@ -247,6 +250,8 @@ Tables below are showing number of observations by category in each data set. Th
 
 # 3. Estimation Methods Comparison
 
+<<<<<<< HEAD
+=======
 ## 3.1 Theoretical Methodology
 
 ### 3.1.1 Data
@@ -269,6 +274,7 @@ In short, our goal is to consider different algorithms and make the best predict
 ## 3.2 Linear Methods
 
 ## 3.3 Non-Linear Methods
+>>>>>>> upstream/master
 TODO: report 004 
 
 \newpage
