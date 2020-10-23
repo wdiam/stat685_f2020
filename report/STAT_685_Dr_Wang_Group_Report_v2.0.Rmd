@@ -22,6 +22,7 @@ output:
     fig_caption: true
     includes:
       in_header: preamble.tex
+    keep_tex:  true      
 documentclass: report
 fontsize: 12pt
 geometry: margin=1in 
@@ -496,7 +497,7 @@ To be more specific, for us to do inference using Linear Regression, independent
 
 Elastic Net is an extension of Linear Regression, where we do a mixture of both of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L_2$ regularization (penalty of $||\bs{\beta}||^2_2$). Then,  $\hat{\beta}(\lambda_1, \lambda_2) = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2 + \lambda_1 ||\bs{\beta}||_1 + \lambda_2 ||\bs{\beta}||_2^2$. 
 
-Note most parameterizations of Elastic Net instead of having separate $\lambda_1$ and $\lambda_2$ have a singular $\lambda$ and a "mixing ratio" between $L_1$ and $L_2$ regularization in the form of $\alpha$. Then, $\hat{\beta}(\lambda, \alpha) = \argminA_\beta \big( ||\bs{y} - \bs{X}\bs{\beta}||^2_2 + \lambda ((1-\alpha)||\bs{\beta}||^2_2 + \alpha ||\bs{\beta}||_1) \big)$. In this parameterization, note that $\alpha=1$ results in LASSO, which has only $L_1$ regularization , and that $\alpha=0$ results in Ridge Regression, which has only $\L_2$ regularization. 
+Note most parameterizations of Elastic Net instead of having separate $\lambda_1$ and $\lambda_2$ have a singular $\lambda$ and a "mixing ratio" between $L_1$ and $L_2$ regularization in the form of $\alpha$. Then, $\hat{\beta}(\lambda, \alpha) = \argminA_\beta \big( ||\bs{y} - \bs{X}\bs{\beta}||^2_2 + \lambda ((1-\alpha)||\bs{\beta}||^2_2 + \alpha ||\bs{\beta}||_1) \big)$. In this parameterization, note that $\alpha=1$ results in LASSO, which has only $L_1$ regularization , and that $\alpha=0$ results in Ridge Regression, which has only $L_2$ regularization. 
 
 An open question remains though on how to choose $\alpha$, the mixture between $L_1$ and $L_2$ regularization, and $\lambda$, how much penalty to impose. For this, we can use $k$-fold cross-validation risk estimates. Namely, for a particular set of hyper-parameters we wish to consider, we can take our training data and split it into $k$ chunks, and for each chunk, we hold it out as the "test" data and learn on the remaining $k-1$ chunks (using our chosen hyper-parameters) and then evaluate on the $k^{\text{th}}$ holdout using, for example, squared error, i.e., $\sumi (y_i) - \hat{y}_i)^2$. We would then average over all $k$ risk estimatess and come up with a singular risk estimate, i.e., the cross-validation risk estimate for the hyper-parameters we used. Then, for the entire set of hyper-parameters, we'd have an associated cross-validation risk-estimate and consequently would choose the one with the lowest risk-estimate, which we're trying to minimmize.
 
