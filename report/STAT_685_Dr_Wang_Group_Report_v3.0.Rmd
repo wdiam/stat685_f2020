@@ -1,0 +1,298 @@
+---
+title: "STAT 685: Dr. Suojin Wang's Group"
+subtitle: |
+  | Modeling Seoul Bike Sharing Demand
+author: "Nam Tran, Bai Zou"
+date: \today
+header-includes:
+   - \usepackage{fontspec}
+   - \setmainfont{Times New Roman}
+   - \usepackage{setspace}
+   - \onehalfspacing
+   - \usepackage{enumitem}
+   - \usepackage{subfig}
+   - \usepackage{url}
+   - \usepackage{listings}
+   - \usepackage{multirow}
+   - \pagenumbering{gobble}
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: true
+    fig_caption: true
+    includes:
+      in_header: preamble.tex
+documentclass: report
+fontsize: 12pt
+geometry: margin=1in 
+urlcolor: blue
+---
+
+```{r packages, message=FALSE, echo=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(echo = TRUE, fig.height = 3, out.extra = "")
+
+require(tidyverse)
+require(dplyr)
+require(caret) 
+require(glmnet)
+require(doParallel)
+require(earth)
+require(vip)
+require(ranger)
+require(xgboost)
+require(RANN)
+require(lubridate)
+require(flipTime)
+require(e1071)
+require(latex2exp)
+require(aTSA)
+
+theme_update(plot.title = element_text(hjust = 0.5))
+```
+
+\newpage
+
+\pagenumbering{roman}
+\setcounter{page}{2}
+\setcounter{tocdepth}{5}
+\setcounter{secnumdepth}{5}
+
+\tableofcontents
+\newpage
+\listoffigures
+\listoftables
+\newpage
+
+\pagenumbering{arabic}
+
+
+
+
+\newpage
+\chapter{Dependency}
+
+```{r partitioningData, cache = TRUE, message=FALSE, echo=FALSE}
+set.seed(1)
+
+# Loading the Data
+datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
+colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
+             "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
+             "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
+dat = read_csv(datPath, col_names = colNames, skip=1)
+
+# Setting up Factors
+dat$Hour = as_factor(dat$Hour)
+dat$Seasons = as_factor(dat$Seasons)
+dat$Holiday = as_factor(dat$Holiday)
+dat$FunctionalDay = as_factor(dat$FunctionalDay)
+
+# Creating DateTime that incorporates both Date and Hours and dropping Hour
+dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+
+# We consider our "train" dataset all that we have, i.e., the total, for which we'll split later. 
+Xtot = dat %>% select(-RentedBikeCount, -Date)
+Ytot = dat %>% pull(RentedBikeCount)
+
+# split data into train and test parts by anchor date
+anchorDate = "2018/11/01"
+
+learnNdx = dat$Date < anchorDate
+
+yl = Ytot[learnNdx]
+yt = Ytot[!learnNdx]
+xl = Xtot[learnNdx,]
+xt = Xtot[!learnNdx, ]
+```
+
+
+\newpage
+\chapter{Forecasting Application}
+
+\section{Business Scenaros}
+
+The purpose to predict bike demand is to make bikes available and accessible to the public at the right time. Thus, the forecasting of hourly bike demand is required to support business decisions and operations. Based on system infrastructure capacity, we define two typical business scenarios below in real application.
+
+\subsection{Daily Data Update}
+The system data is updated on a daily base for further analysis and forecasting to the next 24 hours’ **hourly demand** is required for high-level planning of the next day. To test the performance in this business scenario, we assume the data is updated at 0:00 AM of the day and all available data at the moment is used for model training to predict the next 24 hour demands.
+
+\subsection{Real-time Data Update}
+If the system infrastructure could support real-time data update, an hourly model training could be run to predict the next **hour demand**. Any changes in the past hours could be used in the next hour demand prediction. To test the performance, the models will be trained hourly with all the data available at the moment (include demand data from last hour) and used to predict the demand in the next coming hour.
+
+```{r result_path_setup, cache = TRUE, echo=FALSE}
+datPath = paste0(dirname(getwd()), "/data/")
+Pred_Hours = seq(AsDateTime("2018/11/01")+hours(0), AsDateTime("2018/11/30")+hours(23), by="hour")
+```
+
+
+\section{Hourly Demand Forecasting with Daily Data Update}
+
+\subsection{Estimator and Dependency Features}
+
+When data is updated once every day, the latest observation available to use as dependency feature is the lag 24 for all prediction time stamps. Therefore, dependency features are added for demand from same hour 1 day ago, 2 days ago and 1 week ago. The model training is repeated daily for November 2018.  TODO
+
+
+\subsection{Forecasting Results}
+
+In a daily data update, there are 30 repeated model training and forecasting (1 in each day). In each iteration of model training and forecasting, all observations prior to the iterator date are used as training data and the next 24 hours' hourly demands are used as testing data. The training $R^2$, mean CV $R^2$ and testing $R^2$ results are recorded in each iteration. 
+
+The table below (see Table \@ref(tab:daily_tab)) shows the average training $R^2$ over the 30 iterations is 97.7% and the average mean CV $R^2$ over the 30 iterations is 79.9%. The low average value and large std value in testing $R^2$ represents some poor prediction accuracy in some of the iterations. This can tell clearly in the figure below comparing forecasted demand and real demand (See Figure \@ref(fig:daily_fig)) - at Date Nov 3, Nov 6 and Nov 9, when there's no demand due to non-functional day, the forecasting at the beginning of the day still predicts certain amount of demand.
+
+The overall forecasting $R^2$ is calculated between all forecasted demand and real demand of the 30 iterations and will be used to compare forecasting accuracy in all scenarios. 
+
+ 
+```{r daily_tab, cache = TRUE, dependson = "result_path_setup", echo=FALSE}
+# read forecasting result daily repeat with auto-corr
+read_res_tab <- function(fn){
+   res_tab = read.table(paste0(datPath, fn),sep=",", row.names = 1, header = T)
+   res_tab['run_time', 'avg'] = res_tab['run_time', 'avg']/3600
+   res_tab = res_tab[!row.names(res_tab) %in% "run_time", ]
+   colnames(res_tab) <- c("Average", "Std")
+   rownames(res_tab) <- c("Train_R2 (per train)", "Mean_CV_R2 (per train)", "Test_R2 (per train)", "Overall_Forecasting_R2")
+   return (res_tab)
+}
+res_daily_corr = read_res_tab("output_daily_cor_sum.csv")
+knitr::kable(round(res_daily_corr,3), caption = "Foresting Result with Daily Data Update and Dependency")
+```
+```{r daily_fig, cache = TRUE, dependson = "result_path_setup", echo=FALSE, fig.cap="Forecasted Demand and Real Demand Comparison with Daily Data Update and Dependency"}
+# read forecasting result daily repeat with auto-corr
+pred_daily_corr = read.table(paste0(datPath, "output_pred_daily_cor.csv"),sep=",", row.names = 1, header = T)
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasted Hourly Demand" = "steelblue")
+pred_daily_corr %>% 
+  ggplot(aes(x=Pred_Hours)) + 
+  geom_line(aes(y=Recorded_Y_Test, color = "Real Hourly Demand")) +
+  geom_line(aes(y =Predicted_Y_Test, color="Forecasted Hourly Demand"), linetype="twodash") +
+  labs(y="Rented Bike Count", x="Date and Hour", color = "") +
+  scale_color_manual(values = colors) +
+  theme(legend.position="top")
+```
+
+
+\section{Hourly Demand Forecasting with Real-time Data Update}
+
+\subsection{Dependency Features}
+
+When the data is updated every hour, the last hour demand can be used directly as an autocor- relation feature (lag 1). Therefore, we add demand for 1 hour ago, 2 hours ago, 1 day ago and 1 week ago as autocorrelation features to the data. The modeling training is conducted every hour and used to predict demand only for the coming hour. TODO
+
+\subsection{Forecasting Results}
+
+In the real-time data update, there are 30 $\times$ 24 repeated model training and forecasting (1 in each hour). In each iteration of model training and forecasting, all observations prior to the iterator date and hour are used as training data and the next 1 hour demands is used as testing data. As there is only 1 observation in the testing data, testing $R^2$ is not available. 
+
+The table below (see Table \@ref(tab:hourly_tab)) shows both average training $R^2$ and average mean CV $R^2$ over the 30 $\times$ 24 iterations are over 90%. The overall forecasting $R^2$ reaches 96%. And the figure comparing forecasted demand and real demand below (See Figure \@ref(fig:hourly_fig)) shows a very good match between the two curves, representing an accurate prediction. Moreover, with the real-time data update, the system is able to know the latest demand in the past hour and adjust the coming hour demand prediction - forecasted demand in Nov 3, Nov 6 and Nov 9 stays low when detecting low demand in the last hour.
+
+```{r hourly_tab, cache = TRUE, dependson = "daily_tab", echo=FALSE}
+# read forecasting result daily repeat with auto-corr
+res_hourly_corr = read_res_tab("output_hourly_cor_sum.csv")
+knitr::kable(round(res_hourly_corr,3), caption = "Foresting Result with Real-time Data Update and Dependency")
+```
+
+```{r hourly_fig, cache = TRUE, dependson = "result_path_setup", echo=FALSE, fig.cap="Forecasted Demand and Real Demand Comparison with Real-time Data Update and Dependency"}
+# read forecasting result daily repeat with auto-corr
+pred_hourly_corr = read.table(paste0(datPath, "output_pred_hourly_cor.csv"),sep=",", row.names = 1, header = T)
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasted Hourly Demand" = "steelblue")
+pred_hourly_corr %>% 
+  ggplot(aes(x=Pred_Hours)) + 
+  geom_line(aes(y=Recorded_Y_Test, color = "Real Hourly Demand")) +
+  geom_line(aes(y =Predicted_Y_Test, color="Forecasted Hourly Demand"), linetype="twodash") +
+  labs(y="Rented Bike Count", x="Date and Hour", color = "") +
+  scale_color_manual(values = colors) +
+  theme(legend.position="top")
+```
+
+
+\section{Forecasting Results Comparison}
+
+\subsection{Improvement with Real-time Data Update}
+
+If the system could support real-time data update, the overall forecasting $R^2$ shows a 10% improvement (see Table \@ref(tab:compare_tab)). Comparing the forecasted demand to real demand, the real-time data update forecasting shows a much lower discrepancies than the daily data update forecasting (See Figure \@ref(fig:compare_fig) and \@ref(fig:compare_fig1)). 
+
+```{r compare_tab, cache = TRUE, dependson = c("daily_tab", "hourly_tab"), echo=FALSE}
+compare_tab = res_daily_corr
+colnames(compare_tab) <- c("Daily Data Update with Dependency", "delete")
+compare_tab[, "Real-time Data Update with Dependency"] = res_hourly_corr$Average
+compare_tab = compare_tab %>% select(-delete)
+knitr::kable(round(compare_tab,3), caption = "Forecasting Results Comparison with Dependency")
+```
+
+```{r compare_fig, cache = TRUE, dependson = c("daily_fig", "hourly_fig"), echo=FALSE, fig.cap="Forecasted Demand Comparison with Dependency"}
+compare_df = pred_daily_corr
+colnames(compare_df) = c("pred_daily_corr", "real_demand")
+compare_df$pred_hourly_corr = pred_hourly_corr$Predicted_Y_Test
+
+colors <- c("Real Demand" = "darkred", "Daily Data Update Forecasting" = "steelblue", "Real-time Data Update Forecasting" = "green4")
+
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y=real_demand, color = "Real Demand")) +
+   geom_line(aes(y =pred_daily_corr, color="Daily Data Update Forecasting"), linetype="twodash") +
+   geom_line(aes(y =pred_hourly_corr, color="Real-time Data Update Forecasting"), linetype="twodash") +
+   labs(y="Rented Bike Count", x="Date and Hour", color = "") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top")
+```
+
+```{r compare_fig2, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Residual Comparison with Dependency"}
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y =pred_daily_corr-real_demand, color="Daily Data Update Forecasting")) +
+   geom_line(aes(y =pred_hourly_corr-real_demand, color="Real-time Data Update Forecasting")) +
+   labs(y="Forecasting Residuals", x="Date and Hour", color = " ") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top")
+```
+
+\subsection{Improvement with Dependency}
+
+To better understand the importance of dependency, the same forecasting studies (repeated model training and forecasting on daily base and hourly base) are conducted without dependency features. 
+
+The table below (see Table \@ref(tab:compare_tab2)) shows 8.5% improvement in daily data update and 14.7% improvement in real-time data update in terms of overall forecasting $R^2$. Comparing the two figures plotting forecasting residuals (See Figure \@ref(fig:compare_fig3) and \@ref(fig:compare_fig4)), there's more significant improvement by adding dependency features with real-time data update than the scenario of daily data update - the blue residual line in the second figure is much more smooth than the green line compared with the first figure. 
+
+Moreover, if the system could not support a real-time data update, using the dependency features in the daily data update scenario still brings better (4.3% higher) forecasting accuracy than a real-time data update without dependency. 
+
+```{r compare_tab2, cache = TRUE, dependson = "compare_tab", echo=FALSE}
+res_daily_no_corr = read_res_tab("output_daily_no_cor_sum.csv")
+res_hourly_no_corr = read_res_tab("output_hourly_no_cor_sum.csv")
+compare_tab[, "Daily Data Update without Dependency"] = res_daily_no_corr$Average
+compare_tab[, "Real-time Data Update without Dependency"] = res_hourly_no_corr$Average
+knitr::kable(round(compare_tab,3), caption = "Forecasting Results Comparison with and without Dependency")
+```
+
+```{r compare_fig3, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Daily Data Update"}
+pred_daily_no_corr = read.table(paste0(datPath, "output_pred_daily_no_cor.csv"),sep=",", row.names = 1, header = T)
+compare_df$pred_daily_no_corr = pred_daily_no_corr$Predicted_Y_Test
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasting with Dependency" = "steelblue", "Forecasting without Dependency" = "green4")
+
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y =pred_daily_corr-real_demand, color="Forecasting with Dependency")) +
+   geom_line(aes(y =pred_daily_no_corr-real_demand, color="Forecasting without Dependency"),linetype="twodash") +
+   labs(y="Forecasting Residuals", x="Date and Hour", color = "") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top") + ylim(-1000, 1000)
+```
+
+```{r compare_fig4, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Real-time Data Update"}
+pred_hourly_no_corr = read.table(paste0(datPath, "output_pred_hourly_no_cor.csv"),sep=",", row.names = 1, header = T)
+compare_df$pred_hourly_no_corr = pred_hourly_no_corr$Predicted_Y_Test
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasting with Dependency" = "steelblue", "Forecasting without Dependency" = "green4")
+
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y =pred_hourly_corr-real_demand, color="Forecasting with Dependency")) +
+   geom_line(aes(y =pred_hourly_no_corr-real_demand, color="Forecasting without Dependency"),linetype="twodash") +
+   labs(y="Forecasting Residuals", x="Date and Hour", color = "") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top") + ylim(-1000, 1000)
+```
+
+
+
+
+
+
