@@ -549,49 +549,79 @@ data.frame(e = yl-yhatGlmnet, yhat = yl) %>%
 
 Not surprisingly, the residual plot for Elastic Net shows similar behavior to Linear Regression, suggesting that Elastic Net isn't an appropriate model and further confirmation the linear models aren't appropriate for the problem we have. 
 
-\subsection{Refitted Lasso}
-
-\subsubsection{Theory}
-Note lasso does both model selection as well as implicitly does regularization, which can produce a solution that has too much bias. To overcome this but still attain the benefits of model selection, we can choose a $\lambda_{1SE}$, i.e., the "one-standard-error" $\lambda$ and then refit with unreguarlized linear regression.
-
-\subsubsection{Example}
-```{r fitRefittedLasso, cache = TRUE, dependson = 'data_setup'}
-set.seed(1)
-
-# Fitting with glmnet in general with alpha = 1.0
-glmnetOut     = cv.glmnet(x = xlFullMat, y = yl, alpha = 1.0)
-
-# We use lambda.min since lambda.1se will result in an empty active set!
-betaHatGlmnet = coef(glmnetOut, s = "lambda.min")
-refittedSIdx = which(as.vector(abs(betaHatGlmnet) > 1e-6)[-1])
-
-# Fitting an unregularized linear model
-refittedLassoOut = train(x = xlFullMat[,refittedSIdx], y = yl,
-                         method = "lm",
-                         trControl = trControl)
-```
-
-```{r fitRefittedLasso_yhat, cache = TRUE, dependson = 'fitRefittedLasso'}
-yhatRefitted = predict(refittedLassoOut, xlFullMat[,refittedSIdx])
-```
 
 \section{Non-Linear Methods}
 
 \subsection{Multivariate Adaptive Regression Splines (MARS)}
 
+Multivariate Adaptive Regression Splines (MARS), uses the linear regression framework but constructs features to model non-linearities and their interactions in an automated fashion. Specifically, in a foward-stepwise fashion, it looks over all $p$ features and a specified set of "knots" to identify the most relevant hinge feature to introduce, e.g., $)I(x_j - \kappa_0 > 0$ and $I(x_j - \kappa_0 \leq 0)$. Further, it can introduce interactive features, e.g., $I(x_j - \kappa_0 > 0) \times I(x_k - \kappa_1 \leq 0)$. MARS then uses generalized cross-validation (GCV) to determine some ideal subset of features. 
 
+As such, the number of knots (hinge points) to consider as well as the degree of interaction are hyperparameters.
 
+```{r fitMARS, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for MARS Parameters", echo=FALSE}
+set.seed(1)
+tuneGrid = expand.grid(
+  degree=1:3,                            # number of interactions
+  nprune = c(5,10,15,20,25,30, 50, 100)) # number of knots
+
+marsOut = train(x = xlFullMat, y = yl,
+                method="earth",
+                tuneGrid = tuneGrid,
+                trControl = trControl)
+plot(marsOut)
+```
+
+Here, we can see that as we increase the number of knots, the cross-validation risk estimates lower, eventually leveling off after 50 knots. Further, having interactions help, but seemingly two-way interactions are enough and three-way interactions don't buy us much.
+
+```{r fitMARS_yhat, cache=TRUE, dependson='fitMARS', echo=FALSE}
+yhatMARS = predict(marsOut$finalModel, xlFullMat) %>% as.numeric()
+```
+
+```{r fitMARS_residual_plot, cache=TRUE, dependson='fitMARS', echo=FALSE, fig.height=3, fig.cap="Residual Plot for MARS"}
+data.frame(e = yl-yhatMARS, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+Having introduced non-linearities, we're still using effectively a linear regression framework and as such, we can talk about residual plots. In this case, while there's still not random error and a clear trend, it's not as pronounced as the previous strictly linear predictors. 
 
 
 \subsection{Decision Tree}
 
+```{r fitDT, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Decision Tree Parameters", echo=FALSE}
+set.seed(1)
+tuneGrid = data.frame(cp=c(0.001, 0.0025, 0.005, 0.01, 0.05, 0.1))
+rpartOut = train(x = xlFull, y = yl,
+                 method = "rpart",
+                 tuneGrid = tuneGrid,
+                 trControl = trControl)
+plot(rpartOut)
+```
+The only hyperparmaeter of interest is "Complexity Parameter," which represents the minimum amount of improvement needed from a split in order for the split to be considered. As such, as we increase this hyperparmeter, the more pruned our tree becomes, i.e., it's not as deep. Here, we can see that as we increase this hyperparameter, the cross-validation risk-estimate is increasing. This suggests that our best tree is a fully growned decision tree and that any pruning would be detrimental. 
+
+```{r fitDT_yhat, cache=TRUE, dependson='fitDT', echo=FALSE}
+yhatDT = predict(rpartOut$finalModel, xlFull)
+```
+
+```{r fitDT_residual_plot, cache=TRUE, dependson='fitDT', echo=FALSE, fig.height=3, fig.cap="Residual Plot for Decision Tree"}
+data.frame(e = yl-yhatDT, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+
+At this point, it may not be meaningful to do in-sample residual plots due to the induced non-linearities.
+
 \subsection{Random Forest}
 
-\subsection{Boosting}
-\subsubsection{Theory}
-Fitting, in a stepwise fashion, a greedy nonparametric procedure. Meta-parameters are $\lambda$, the learning rate, and $B$ the number of steps. 
+Decision trees are perceived as low bias high variance procedures. This is to say when we permute the data set, decision trees don't necessarily generalize well. As such, we want to maintain the low bias while also lowering the variance. Bagging is an approach of using an ensemble of trees, where for each tree we bootstrap our data and the tree is fit upon that bootstrap data. The concern is that we might not get as much variance decrease as we'd like, since for a particulraly strong covariate, it might show up in every single tree, thus inducing dependency therefore limiting the variance decrease. Random Forest builds upon bagging by for each split, we only determine a subset of the covariates, typically $\sqrt{p}$, where $p$ is the number of covariates. 
 
-\subsubsection{Example}
+
+\subsection{Boosting}
+
+\newpage
+\chapter{Dependency Structure}
+
 
 \newpage
 \chapter{Forecasting Model Comparison}
