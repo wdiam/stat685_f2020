@@ -48,6 +48,8 @@ require(flipTime)
 require(e1071)
 require(latex2exp)
 require(aTSA)
+require(forecast)
+require(Ckmeans.1d.dp)
 
 theme_update(plot.title = element_text(hjust = 0.5))
 ```
@@ -71,42 +73,220 @@ theme_update(plot.title = element_text(hjust = 0.5))
 
 
 \newpage
-\chapter{Dependency}
+\chapter{Dependency of $Y_t$}
 
-```{r partitioningData, cache = TRUE, message=FALSE, echo=FALSE}
+```{r data_setup_4, cache = TRUE, message=FALSE, echo=FALSE, dependson="packages"}
 set.seed(1)
 
-# Loading the Data
-datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
-colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
-             "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
-             "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
-dat = read_csv(datPath, col_names = colNames, skip=1)
+load_data <- function(){
+   # Loading the Data
+   datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
+   colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
+                "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
+                "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
+   dat = read_csv(datPath, col_names = colNames, skip=1)
+   
+   # Setting up Factors
+   dat$Hour = as_factor(dat$Hour)
+   dat$Seasons = as_factor(dat$Seasons)
+   dat$Holiday = as_factor(dat$Holiday)
+   dat$FunctionalDay = as_factor(dat$FunctionalDay)
+   
+   # Creating DateTime that incorporates both Date and Hours and dropping Hour
+   dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+   
+   # Identifying qualitative features
+   featureLevels = sapply(dat, function(x) { length(unique(x)) })
+   qualFeatures = which(featureLevels < 30)
 
-# Setting up Factors
-dat$Hour = as_factor(dat$Hour)
-dat$Seasons = as_factor(dat$Seasons)
-dat$Holiday = as_factor(dat$Holiday)
-dat$FunctionalDay = as_factor(dat$FunctionalDay)
+   xQuant = dat %>% select(-all_of(qualFeatures))
+   xQual  = dat %>% select(all_of(qualFeatures))
+   
+   # Creating Dummary Variables 
+   ppDummy = dummyVars(~ ., data = xQual, fullRank = TRUE)
+   xQualPost = predict(ppDummy, xQual)
+   
+   datFull = cbind(xQuant, xQualPost)
+   
+   return (datFull)
+}
 
-# Creating DateTime that incorporates both Date and Hours and dropping Hour
-dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+dat = load_data()
 
-# We consider our "train" dataset all that we have, i.e., the total, for which we'll split later. 
-Xtot = dat %>% select(-RentedBikeCount, -Date)
-Ytot = dat %>% pull(RentedBikeCount)
+# split into train and test, X and y
+split_data <- function(df, anchorDate = "2018/11/01"){
+   Xtot = df %>% select(-RentedBikeCount, -Date)
+   Ytot = df %>% pull(RentedBikeCount)
+   
+   # split data into train and test parts by anchor date
+   learnNdx = df$Date < anchorDate
+   
+   y_l = Ytot[learnNdx]
+   y_t = Ytot[!learnNdx]
+   x_l = Xtot[learnNdx,]
+   x_t = Xtot[!learnNdx, ]
+      
+   xl_FullMat = as.matrix(x_l)
+   xt_FullMat = as.matrix(x_t)
+   
+   colnames(xl_FullMat) <- colnames(Xtot)
+   colnames(xt_FullMat) <- colnames(Xtot)
+   
+   return(list(xlFullMat=xl_FullMat, yl=y_l, xtFullMat=xt_FullMat, yt=y_t))
+}
 
-# split data into train and test parts by anchor date
-anchorDate = "2018/11/01"
-
-learnNdx = dat$Date < anchorDate
-
-yl = Ytot[learnNdx]
-yt = Ytot[!learnNdx]
-xl = Xtot[learnNdx,]
-xt = Xtot[!learnNdx, ]
+dat_set0 = split_data(df=dat, anchorDate = "2018/11/01")
+xlFullMat=dat_set0$xlFullMat
+yl=dat_set0$yl
+xtFullMat=dat_set0$xtFullMat
+yt=dat_set0$yt
 ```
 
+\section{Autocorrelation and Partial Autocorrelation of Rented Biked Count, $y_t$}
+
+In section 2.2, the ACF and PACF plots are suggesting strong autocorrelation of the past bike demand. The ACF shows a clear daily trend (every 24 lags). The hour feature used in estimators can be used to reflect this daily trend. The PACF shows significant dependence between demand and past demands - lag 1, 2, 3, 4, 5, 8, 9 ,10, etc. However, this past demand information is not well used in previous estimators. A simple way to use the information is to add dependency features of past demand.
+
+```{r yt_acf_pacf2, cache = TRUE, dependson = 'data_setup_4', fig.cap="Autocorrelation and Partial Autocorrelation of Rented Bike Count, i.e., $y_t$", echo=FALSE}
+selfACF2  = ggAcf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+selfPACF2 = ggPacf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+
+plots = list(selfACF2, selfPACF2)
+gridExtra::grid.arrange(grobs = plots, ncol=2)
+```
+
+\section{Dependency Feature}
+
+In addition to weather feature and hour feature, add dependency features for past demand: e.g., lag_1 means demand in the last hour; lag_4 means hourly demand 4 hours ago, etc. By adding dependency features, the top observations will have missing value as past demand information is not available. The obaservation with missing values will be deleted from training data. 
+
+\subsection{Estimation without Dependency Features}
+
+```{r boosting, cache = TRUE, dependson = 'data_setup_4', echo=FALSE, message=FALSE, warning=FALSE}
+# cl = makeCluster(6)
+# registerDoParallel(cl)
+trControl = trainControl(method = "cv", number = 10)
+
+set.seed(1)
+tuneGrid = expand.grid("nrounds" = c(750),
+                       "max_depth" = c(6, 8),
+                       "eta" = c(0.01),
+                       "gamma" = 0,
+                       "colsample_bytree" = c(0.7),
+                       "min_child_weight" = 0,
+                       "subsample" = 0.75)
+
+boostOutObjSe = train(x=xlFullMat, y = yl,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl)
+cal_test_R2 <- function(boost_Out, xtFullM, y_t){
+   yhat = predict(boost_Out, xtFullM)
+   test_R2 = 1 - sum((yhat - y_t)^2) / sum((y_t - mean(y_t))^2)
+   return (test_R2)
+}
+r2_0 = cal_test_R2(boostOutObjSe, xtFullMat, yt)
+```
+
+In previous study, boosting method brings the best result among all estimation methods. Therefore, the estimator using boosting method with parameter tuned from previous study will be used in all following model training and predictions. All observations before anchor date Nov 1, 2018 will are used for training and the 30 observations from Nov 1, 2018 to Nov 30, 2018 are used for testing.
+To compare the impact of dependency feature, model $M_0$ is fit with only weather features and hour information. The test $R^2$ in $M_0$ is `r round(r2_0, 3)`. The figure below is showing the feature importance from $M_0$, which suggesting 'Temp' as the most important features effecting the demand. 
+
+```{r boosting_plot, cache = TRUE, dependson = 'boosting', echo=FALSE, fig.cap="Feature Importance $M_0$ "}
+importance_matrix = xgb.importance(colnames(xlFullMat), model = boostOutObjSe$finalModel)
+xgb.ggplot.importance(importance_matrix, top_n=15)
+```
+
+
+\subsection{Estimation with Dependency Features}
+
+```{r add_lag, cache = TRUE, dependson = 'data_setup_4', echo=FALSE, message=FALSE}
+add_lag<-function(lag, df){
+   lag_demand = df[1:(dim(df)[1]-lag), 'RentedBikeCount']
+   fill_lag = rep(NaN, lag)
+   fill_lag = c(fill_lag, lag_demand)
+   return(fill_lag)
+}
+
+add_past_hour_demand <- function(df, past_hour_vec){
+   for (lag_hour in sort(past_hour_vec)){
+      col_name = paste0("lag_", lag_hour)
+      lag_col = add_lag(lag=lag_hour, df=df)
+      df[, col_name] = lag_col
+   }
+   df = df[complete.cases(df), ]
+   return(df)
+}
+```
+
+```{r boosting1, cache = TRUE, dependson = c('boosting','add_lag'), echo=FALSE, message=FALSE, warning=FALSE}
+dat1 = add_past_hour_demand(df=dat, past_hour_vec=c(1,2,3,4,5,8,9,10,11,12,13,15,16,17,18,19,20,21,22,23,24))
+dat_set1 = split_data(df=dat1, anchorDate = "2018/11/01")
+xlFullMat1=dat_set1$xlFullMat
+yl1=dat_set1$yl
+xtFullMat1=dat_set1$xtFullMat
+yt1=dat_set1$yt
+
+boostOutObjSe1 = train(x=xlFullMat1, y = yl1,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl)
+r2_1 = cal_test_R2(boostOutObjSe1, xtFullMat1, yt1)
+```
+
+Based on PACF plot, dependency features within 1 day (24 hours) are selected for the model fitting, including the past 1-24 hour demand except for lag 6, 7, 14, as $M_1$. With the additional 21 columns added to X, the test $R^2$ goes up to `r round(r2_1, 3)` - a significant improvement from $M_0$. In addition, the feature importance plot for $M_1$ below shows the past demand features are more important than weather features compared with $M_0$.
+
+```{r boosting_plot1, cache = TRUE, dependson = 'boosting2', echo=FALSE, fig.cap="Feature Importance $M_1$ "}
+importance_matrix = xgb.importance(colnames(xlFullMat1), model = boostOutObjSe1$finalModel)
+xgb.ggplot.importance(importance_matrix, top_n=15)
+```
+
+\subsection{Estimation with Reduced Dependency Features}
+```{r boosting2, cache = TRUE, dependson = c('boosting','add_lag'), echo=FALSE, message=FALSE, warning=FALSE}
+dat2 = add_past_hour_demand(df=dat, past_hour_vec=c(1,2,11,16,24))
+dat_set2 = split_data(df=dat2, anchorDate = "2018/11/01")
+xlFullMat2=dat_set2$xlFullMat
+yl2=dat_set2$yl
+xtFullMat2=dat_set2$xtFullMat
+yt2=dat_set2$yt
+
+boostOutObjSe2 = train(x=xlFullMat2, y = yl2,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl)
+r2_2 = cal_test_R2(boostOutObjSe2, xtFullMat2, yt2)
+```
+
+Based on the feature importance plot of $M_1$ and the PACF plot, the dependency features can be reset to lag 1, 2, 11, 16 and 24 to reduce the size of X variables. Thus $M_2$ is fitted with smaller number of dependency features and the test $R^2$ is `r round(r2_2, 3)`, which is less than 1% lower than $M_1$ and significant higher than $M_0$.
+
+\subsection{Estimation with Dependency Features Defined by Business Assumptions}
+```{r boosting3, cache = TRUE, dependson = c('boosting','add_lag'), echo=FALSE, message=FALSE, warning=FALSE}
+dat3 = add_past_hour_demand(df=dat, past_hour_vec=c(1,2,24,48, 24*7))
+dat_set3 = split_data(df=dat3, anchorDate = "2018/11/01")
+xlFullMat3=dat_set3$xlFullMat
+yl3=dat_set3$yl
+xtFullMat3=dat_set3$xtFullMat
+yt3=dat_set3$yt
+
+boostOutObjSe3 = train(x=xlFullMat3, y = yl3,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl)
+r2_3 = cal_test_R2(boostOutObjSe3, xtFullMat3, yt3)
+```
+
+In $M_3$, the dependency features added is lag 1, 2, 24, 48 and 24 $\times$ 7 based on business assumptions that the demand is related to the past demands 1 and 2 hours ago, 1 day ago and 1 week ago. The test $R^2$ is `r round(r2_3, 3)`, which is as good as $M_1$ and $M_2$. 
+
+\subsection{Estimation Comparison}
+
+The table below is comparing the test $R^2$ among models with different dependency features. Considering the test accuracy and variable size, $M_2$ and $M_3$ are preferred.
+
+```{r boosting_compare, cache = TRUE, dependson = c('boosting','boosting1', 'boosting2', 'boosting3'), echo=FALSE, message=FALSE}
+r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),3))
+rownames(r2_df) <- c('No_Dependency_Feature', 'Full_Dependency_Feature', 'Reduced_Dependency_Feature', 'Business_Dependency_Feature')
+knitr::kable(r2_df, caption = "Test R2 Comparison of Models with Different Dependency Features")
+```
 
 \newpage
 \chapter{Forecasting Application}
@@ -131,8 +311,7 @@ Pred_Hours = seq(AsDateTime("2018/11/01")+hours(0), AsDateTime("2018/11/30")+hou
 
 \subsection{Estimator and Dependency Features}
 
-When data is updated once every day, the latest observation available to use as dependency feature is the lag 24 for all prediction time stamps. Therefore, dependency features are added for demand from same hour 1 day ago, 2 days ago and 1 week ago. The model training is repeated daily for November 2018.  TODO
-
+When data is updated once every day, the latest observation available to use as dependency feature is the lag 24 for all prediction time stamps. Therefore, the smallest lag of dependency features can be added is lag 24. Based on the business assumption in dependency feature study, lag 24, 48 and 24 $\times$ 7 are added as dependency features, which represent the past demand from same hour 1 day ago, 2 days ago and 1 week ago. The model training is repeated daily for November 2018. And the forecasting method is boosting using the parameters tuned from previous study. 
 
 \subsection{Forecasting Results}
 
@@ -175,7 +354,7 @@ pred_daily_corr %>%
 
 \subsection{Dependency Features}
 
-When the data is updated every hour, the last hour demand can be used directly as an autocor- relation feature (lag 1). Therefore, we add demand for 1 hour ago, 2 hours ago, 1 day ago and 1 week ago as autocorrelation features to the data. The modeling training is conducted every hour and used to predict demand only for the coming hour. TODO
+When the data is updated in real-time, all past demands up to one hour ago (lag 1) can be used as dependency feature. Therefore, we add the past demand from 1 hour ago, 2 hours ago, 1 day ago and 1 week ago as dependency features to the data ($M_3$ in previous study). The modeling training is repeated every hour and used to predict demand only for the coming hour. And the forecasting method is boosting using the parameters tuned from previous study.  
 
 \subsection{Forecasting Results}
 
@@ -235,7 +414,7 @@ compare_df %>%
    theme(legend.position="top")
 ```
 
-```{r compare_fig2, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Residual Comparison with Dependency"}
+```{r compare_fig2, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasting Residual Comparison with Dependency"}
 compare_df %>% 
    ggplot(aes(x=Pred_Hours)) + 
    geom_line(aes(y =pred_daily_corr-real_demand, color="Daily Data Update Forecasting")) +

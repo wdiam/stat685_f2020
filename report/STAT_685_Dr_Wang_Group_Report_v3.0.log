@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.14159265-2.6-0.99998 (TeX Live 2017) (preloaded format=xelatex 2017.5.23)  1 NOV 2020 17:31
+This is XeTeX, Version 3.14159265-2.6-0.99998 (TeX Live 2017) (preloaded format=xelatex 2017.5.23)  3 NOV 2020 23:14
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1950,21 +1950,21 @@ LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/bx/n' will be
 LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/bx/n' will be
 (Font)              scaled to size 12.0pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(0)/m/n' will be
-(Font)              scaled to size 8.73235pt on input line 3.
+(Font)              scaled to size 8.73235pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(0)/m/n' will be
-(Font)              scaled to size 6.20241pt on input line 3.
+(Font)              scaled to size 6.20241pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 12.00018pt on input line 3.
+(Font)              scaled to size 12.00018pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 8.41495pt on input line 3.
+(Font)              scaled to size 8.41495pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
-(Font)              scaled to size 5.97696pt on input line 3.
+(Font)              scaled to size 5.97696pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 11.99982pt on input line 3.
+(Font)              scaled to size 11.99982pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 8.41469pt on input line 3.
+(Font)              scaled to size 8.41469pt on input line 1.
 LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
-(Font)              scaled to size 5.97679pt on input line 3.
+(Font)              scaled to size 5.97679pt on input line 1.
 )
 \tf@toc=\write3
 \openout3 = `STAT_685_Dr_Wang_Group_Report_v3.0.toc'.
@@ -1985,50 +1985,112 @@ LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
 
 ]
 Chapter 1.
-[1
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 147.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `subscript' on input line 147.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 147.
+
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(0)/m/n' will be
+(Font)              scaled to size 25.81885pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(0)/m/n' will be
+(Font)              scaled to size 21.52263pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(0)/m/n' will be
+(Font)              scaled to size 17.93205pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
+(Font)              scaled to size 24.88037pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
+(Font)              scaled to size 20.74031pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(1)/m/n' will be
+(Font)              scaled to size 17.28026pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
+(Font)              scaled to size 24.87962pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
+(Font)              scaled to size 20.73969pt on input line 147.
+LaTeX Font Info:    Font shape `TU/latinmodern-math.otf(2)/m/n' will be
+(Font)              scaled to size 17.27972pt on input line 147.
+LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/m/n' will be
+(Font)              scaled to size 17.28pt on input line 149.
+LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/bx/n' will be
+(Font)              scaled to size 17.28pt on input line 149.
+
+Underfull \hbox (badness 1721) in paragraph at lines 149--149
+[]\TU/TimesNewRoman(0)/bx/n/17.28 Autocorrelation and Partial Autocorrelation o
+f Rented
+ []
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 149.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `subscript' on input line 149.
+
+
+Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+(hyperref)                removing `math shift' on input line 149.
+
+File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/yt_acf_pacf2-1.pdf 
+Graphic file (type QTm)
+
+<use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/yt_acf_pacf2-1.pdf
+" > [1
 
 ]
+LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/bx/n' will be
+(Font)              scaled to size 14.4pt on input line 173.
+File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/boosting_plot-1.pdf
+ Graphic file (type QTm)
+
+<use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/boosting_plot-1.pd
+f" > [2]
+File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/boosting_plot1-1.pd
+f Graphic file (type QTm)
+
+<use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/boosting_plot1-1.p
+df" > [3] [4]
 Chapter 2.
-LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/m/n' will be
-(Font)              scaled to size 17.28pt on input line 152.
-LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/bx/n' will be
-(Font)              scaled to size 17.28pt on input line 152.
-LaTeX Font Info:    Font shape `TU/TimesNewRoman(0)/bx/n' will be
-(Font)              scaled to size 14.4pt on input line 160.
-[2
+[5
 
 ]
 File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/daily_fig-1.pdf Gra
 phic file (type QTm)
 
 <use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/daily_fig-1.pdf" >
-[3]
-Underfull \hbox (badness 1005) in paragraph at lines 252--262
+[6]
+Underfull \hbox (badness 1005) in paragraph at lines 352--362
 []\TU/TimesNewRoman(0)/m/n/12 The table below (see Table @ref(tab:hourly_tab)) 
 shows both average training $[][]$ and av-
  []
 
-[4]
+[7]
 File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/hourly_fig-1.pdf Gr
 aphic file (type QTm)
 
 <use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/hourly_fig-1.pdf" 
 >
-Overfull \hbox (50.73917pt too wide) in alignment at lines 296--302
+Overfull \hbox (50.73917pt too wide) in alignment at lines 396--402
  [] [] [] 
  []
 
 
-Overfull \hbox (50.73917pt too wide) in alignment at lines 302--307
+Overfull \hbox (50.73917pt too wide) in alignment at lines 402--407
  [] [] [] 
  []
 
 
-Overfull \hbox (50.73917pt too wide) in alignment at lines 307--313
+Overfull \hbox (50.73917pt too wide) in alignment at lines 407--413
  [] [] [] 
  []
 
-[5]
+[8]
 File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/compare_fig-1.pdf G
 raphic file (type QTm)
 
@@ -2038,41 +2100,42 @@ File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/compare_fig2-1.pdf
 Graphic file (type QTm)
 
 <use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/compare_fig2-1.pdf
-" > [6]
-Overfull \hbox (18.32277pt too wide) in paragraph at lines 387--388
+" > [9]
+Overfull \hbox (18.32277pt too wide) in paragraph at lines 487--488
 []\TU/TimesNewRoman(0)/m/n/12 Mean_CV_R2 
  []
 
 
-Overfull \hbox (66.29933pt too wide) in paragraph at lines 409--410
+Overfull \hbox (66.29933pt too wide) in paragraph at lines 509--510
 []\TU/TimesNewRoman(0)/m/n/12 Overall_Forecasting_R2|  
  []
 
+[10]
 File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/compare_fig3-1.pdf 
 Graphic file (type QTm)
 
 <use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/compare_fig3-1.pdf
-" > [7]
+" >
 File: STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/compare_fig4-1.pdf 
 Graphic file (type QTm)
 
 <use  "STAT_685_Dr_Wang_Group_Report_v3.0_files/figure-latex/compare_fig4-1.pdf
 " >
-Package atveryend Info: Empty hook `BeforeClearDocument' on input line 430.
-[8]
-Package atveryend Info: Empty hook `AfterLastShipout' on input line 430.
+Package atveryend Info: Empty hook `BeforeClearDocument' on input line 530.
+[11]
+Package atveryend Info: Empty hook `AfterLastShipout' on input line 530.
 (./STAT_685_Dr_Wang_Group_Report_v3.0.aux)
-Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 430.
-Package atveryend Info: Empty hook `AtEndAfterFileList' on input line 430.
-Package atveryend Info: Empty hook `AtVeryVeryEnd' on input line 430.
+Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 530.
+Package atveryend Info: Empty hook `AtEndAfterFileList' on input line 530.
+Package atveryend Info: Empty hook `AtVeryVeryEnd' on input line 530.
  ) 
 Here is how much of TeX's memory you used:
- 27671 strings out of 493005
- 490536 string characters out of 6134596
- 714638 words of memory out of 5000000
- 31337 multiletter control sequences out of 15000+600000
- 10051 words of font info for 70 fonts, out of 8000000 for 9000
+ 27733 strings out of 493005
+ 492481 string characters out of 6134596
+ 715921 words of memory out of 5000000
+ 31387 multiletter control sequences out of 15000+600000
+ 12934 words of font info for 88 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 58i,9n,120p,10429b,475s stack positions out of 5000i,500n,10000p,200000b,80000s
+ 58i,9n,120p,10429b,477s stack positions out of 5000i,500n,10000p,200000b,80000s
 
-Output written on STAT_685_Dr_Wang_Group_Report_v3.0.pdf (12 pages).
+Output written on STAT_685_Dr_Wang_Group_Report_v3.0.pdf (15 pages).

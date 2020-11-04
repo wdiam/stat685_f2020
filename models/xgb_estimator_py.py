@@ -245,6 +245,6 @@ if __name__ == '__main__':
         json.dump(sum_t_hourly_2, fp)
 
     sum_t_hourly_2_df = printout_result(sum_t_hourly_2)
-    sum_t_hourly_2_df.to_csv(os.path.join(project_path, "data/output_daily_no_cor_sum.csv")
+    sum_t_hourly_2_df.to_csv(os.path.join(project_path, "data/output_daily_no_cor_sum.csv"))
 
     printout_result(sum_t_hourly_2)
