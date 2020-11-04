@@ -1,0 +1,1023 @@
+---
+title: "STAT 685: Dr. Suojin Wang's Group"
+subtitle: |
+  | Modeling Seoul Bike Sharing Demand
+author: "Nam Tran, Bai Zou"
+date: \today
+header-includes:
+   - \usepackage{fontspec}
+   - \setmainfont{Times New Roman}
+   - \usepackage{setspace}
+   - \onehalfspacing
+   - \usepackage{enumitem}
+   - \usepackage{subfig}
+   - \usepackage{url}
+   - \usepackage{listings}
+   - \usepackage{multirow}
+   - \pagenumbering{gobble}
+output: 
+  bookdown::pdf_document2:
+    latex_engine: xelatex
+    number_sections: true
+    fig_caption: true
+    includes:
+      in_header: preamble.tex
+    keep_tex:  true
+    citation_package: biblatex    
+bibliography: references.bib  
+biblio-style: numeric
+documentclass: report
+fontsize: 12pt
+geometry: margin=1in 
+urlcolor: blue
+---
+
+```{r packages, message=FALSE, echo=FALSE}
+rm(list=ls())
+
+knitr::opts_chunk$set(echo = TRUE, fig.height = 3, out.extra = "")
+
+require(tidyverse)
+require(dplyr)
+require(caret) 
+require(glmnet)
+require(doParallel)
+require(earth)
+require(vip)
+require(ranger)
+require(xgboost)
+require(RANN)
+require(lubridate)
+require(flipTime)
+require(e1071)
+require(latex2exp)
+require(aTSA)
+require(forecast)
+require(reshape2)
+require(GGally)
+require(Ckmeans.1d.dp)
+
+theme_update(plot.title = element_text(hjust = 0.5))
+```
+
+\newpage
+
+\pagenumbering{roman}
+\setcounter{page}{2}
+\setcounter{tocdepth}{5}
+\setcounter{secnumdepth}{5}
+
+\tableofcontents
+\newpage
+\listoffigures
+\listoftables
+\newpage
+
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+
+```{r data_setup, cache=TRUE, message=FALSE, echo=FALSE}
+set.seed(1)
+
+# Loading the Data
+datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
+colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
+             "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
+             "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
+dat = read_csv(datPath, col_names = colNames, skip=1)
+
+# Setting up Factors
+dat$Hour = as_factor(dat$Hour)
+dat$Seasons = as_factor(dat$Seasons)
+dat$Holiday = as_factor(dat$Holiday)
+dat$FunctionalDay = as_factor(dat$FunctionalDay)
+
+# Creating DateTime that incorporates both Date and Hours and dropping Hour
+dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+
+# We consider our "train" dataset all that we have, i.e., the total, for which we'll split later. 
+Xtot = dat %>% select(-RentedBikeCount, -Date)
+Ytot = dat %>% pull(RentedBikeCount)
+
+# Partitioning
+anchorDate = "2018/11/01"
+learnNdx = dat$Date < anchorDate
+
+yl = Ytot[learnNdx]
+yt = Ytot[!learnNdx]
+xl = Xtot[learnNdx,]
+xt = Xtot[!learnNdx, ]
+
+# Qualtitative Features
+featureLevels = sapply(xl, function(x) { length(unique(x)) })
+#head(sort(featureLevels), 5)
+
+# Missing Data
+featureNA   = head(sort(sapply(xl, function(x) { sum(is.na(x) )}), decreasing = TRUE))
+obsNA       = head(sort(apply(xl, 1, function(x) { sum(is.na(x) )}), decreasing = TRUE))
+naSummaryDf = data.frame(featureNA=featureNA, obsNA=obsNA, row.names = 1:length(obsNA))
+
+# Data Normalization
+# ---------------------------------------
+# Identifying qualitative features
+# ---------------------------------------
+qualFeatures = which(featureLevels < 30)
+
+xlQuant = xl %>% select(-all_of(qualFeatures))
+xlQual  = xl %>% select(all_of(qualFeatures))
+xtQuant = xt %>% select(-all_of(qualFeatures))
+xtQual  = xt %>% select(all_of(qualFeatures))
+
+# ---------------------------------------
+# Center/Scale of Quantitative Features
+# ---------------------------------------
+ppStandardization = preProcess(xlQuant, method=c("center", "scale"))
+xlQuantPost = predict(ppStandardization, xlQuant)
+xtQuantPost = predict(ppStandardization, xtQuant)
+
+# ---------------------------------------
+# Creating Dummary Variables 
+# ---------------------------------------
+ppDummy = dummyVars(~ ., data = xlQual, fullRank = TRUE)
+
+xlQualPost = predict(ppDummy, xlQual)
+xtQualPost = predict(ppDummy, xtQual)
+
+# ---------------------------------------
+# Getting a singular matrix now
+# ---------------------------------------
+xlFull = cbind(xlQuantPost, xlQualPost)
+xtFull = cbind(xtQuantPost, xtQualPost)
+
+xlFullMat = as.matrix(xlFull)
+xtFullMat = as.matrix(xtFull)
+
+# Correlation Amongst the Features
+corMat = cor(xlFull)
+absCorMat = abs(corMat)[upper.tri(corMat)]
+#round(quantile(absCorMat, c(0.5, 0.75, 0.9, 0.95, 0.99, 1)), 3)
+
+# Identifying outliers
+pcaOut = prcomp(xlFull, center=FALSE, scale=FALSE)
+#pcaOut$x[,1:2] %>% as.data.frame %>% ggplot() +
+#  geom_point(aes(x=PC1, y=PC2))
+
+# Setting up multi-cluster
+cl = makeCluster(6)
+registerDoParallel(cl)
+
+trControl = trainControl(method = "cv", number = 10)
+```
+
+\section{Background}
+
+Our data set is the "Seoul Bike Sharing Demand Data Set", which on a high level contains hourly data for bike usage as well as various covariates that might be useful, e.g., temperature. Further, it contains around one year of data.
+
+The data set has been aggregated and been uploaded to the UCI Machine Learning Repository, located here: http://archive.ics.uci.edu/ml/datasets/Seoul+Bike+Sharing+Demand
+
+At first glance, relevant pieces are:
+
+* Contains 8760 observations
+
+* There are 14 columns
+
+Regarding motivation for the data set and its potential use, the following is taken from the UCI website and was attached by the team that donated the data: "
+
+"Currently Rental bikes are introduced in many urban cities for the enhancement of mobility comfort. It is important to make the rental bike available and accessible to the public at the right time as it lessens the waiting time. Eventually, providing the city with a stable supply of rental bikes becomes a major concern. The crucial part is the prediction of bike count required at each hour for the stable supply of rental bikes.
+
+The dataset contains weather information (Temperature, Humidity, Windspeed, Visibility, Dewpoint, Solar radiation, Snowfall, Rainfall), the number of bikes rented per hour and date information."
+
+\section{Previous Work}
+
+@epc20 looked at the same bike sharing data and looked at different learning algorithms on the original covariates in order to optimize prediction, using squared error as their evaluation metric. Different learning algorithms they look at include linear regression, gradient boosting machine's, support vector machines with radial basis functions, as well as xgboost. Ultimately, their best results were $R_{\text{train}}^2 = 0.96$ and $R_{\text{test}}^2 = 0.92$ using xgboost.
+
+@ec20 only varies marginaly from @epc20 in that they have an additional data set they consider, which they don't use as additional test data but instead run their same methodology on the Seoul bike sharing data and seeing if they get similar results. They do look at different learning algorithms, including CUBIST, random forest, CART, KNN, and conditional inference trees. 
+
+We have a deep concern with the previous work in that they don't make no reference to how they split up into 75% train and 25% test, e.g., is it randomly choose interleaved train and test or is it a specific calendar day and everything after is test and everythign prior is train? If interleaved, the the 75% training data’s distribution and 25% test data's distribution are effectively identical and learning on the train portion can be deemed “cheating” since data has leaked. 
+
+Also, from a learning methodology, they don't consider $L_1$ regularization directly when using linear regression. Further, they don't consider non-linear transforms of the data, which may not be that important given the usage of decision trees, but could have allowed plain linear regression to perform better.
+
+\section{Scope and Goal}
+
+Based on the description above, we break it into two potential business requirements here:
+
+* Predict next day hourly demand based on historical data until the current day.
+
+* Real-time prediction for next hour demand based on historical data until the current hour.
+
+The scope in this study is to:
+
+* Re-define training and testing data with anchor time.
+
+* Re-evaluate estimation methods with data splitting by anchor time.
+
+* Build forecasting models to predict the next hour demand and compare the models in terms of prediction accuracy, prediction variance, running time, etc.
+
+
+\newpage
+\chapter{Data Exploratory}
+
+\section{Seoul Bike Sharing Demand Data}
+* Downloaded the data from the [UCI Machine Learning Repo](https:/http://archive.ics.uci.edu/ml/datasets/Seoul+Bike+Sharing+Demand).
+* Contains 8760 measurements of number of bikes rented over 364.958 days.
+
+Features of the data are,
+
+* `DateTime`
+* `RentedBikeCount`
+* `Temp`, in Celsius.
+* `Humidity`, in percent, max of 100.
+* `Windspeed`
+* `Visibility` out to 10 meters.
+* `DewPointTemp`, in Celsius.
+* `SolarRadiation`
+* `Rainfall`, in mm.
+* `Snowfall`, in cm.
+* `Seasons`, a factor with levels {Winter, Spring, Summer, Autumn}.
+* `Holiday`, a factor with levels {Holiday, No holiday}.
+* `FunctionalDay`, a factor with levels {NoFunc(Non Functional Hours), Fun(Functional hours)}
+
+
+\section{Time Series Data}
+
+Fundamentally, our data is time-series data (Figure 2.1). As such, let $y_t$ be the time series we're working to model, i.e., Seoul's bike sharing data. 
+
+```{r ytDataPlot, cache = TRUE, dependson = 'data_setup', fig.cap="Hourly Rented Bike Count Over Entire Time Period", echo=FALSE}
+dat %>% 
+  ggplot(aes(x=Date, y=RentedBikeCount)) +
+  geom_line() +
+  labs(y="Rented Biked Count", "Date Time (Hour)")
+```
+
+\subsection{Stationarity}
+
+It's arguable that there might be a strong seasonality component (less in winter more in summer), but that's hard to ascertain here since we only have one year's of data and only have one cycle. Further, there might be strong seasonality on an intraday basis (less in early morning and ramp up afterwards). If there was a strong seasonality component, we'd say our data isn't stationary, since on a first order basis, $E(y_t)$ will be dependent on $t$. Stationarity is important for a multitude of reasons, including *averaging being meaningful* and any *conditional expectation model we build is stable*.
+
+Note, we can still incorporate terms to make a time series stationary, e.g., trend-stationary. 
+
+We can test this directly using the Augmented Dickey-Fuller (ADF) Test, which intuitively tests for the presence of a unit root, which implies non-stationarity. $H_0$ for ADF is that $y_t$ is non-stationary, and $H_a$ is that $y_t$ is stationary. Note there are different types of stationarity, e.g., in presence of drift ($\mu$) or linear trend ($\beta t$). 
+
+```{r ytAdfPlot, cache = TRUE, dependson = 'data_setup', fig.cap="Augmented Dickey Fuller (ADF) Test for Stationarity", echo=FALSE}
+zz = adf.test(dat$RentedBikeCount, 100, output=FALSE)
+adf1 = zz[[1]] %>% data.frame %>% mutate(Type="No Drift, No Trend")
+adf2 = zz[[2]] %>% data.frame %>% mutate(Type="With Drift, No Trend")
+adf3 = zz[[3]] %>% data.frame %>% mutate(Type="With Drift, With Trend")
+adfDat = bind_rows(adf1, adf2, adf3)
+
+adfDat %>% ggplot(aes(x=lag, y=p.value, color=Type)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(yintercept=0.05, linetype="dashed", color = "black") +
+  labs(x="Lag", y="p-value")
+```
+
+Note that each lag, i.e., tick mark, in the ADF figure represents an hour. Under the most relaxed condition of no drift and no trend, then we can see that we start getting significant non-stationarity post lag 48, which represents approximately two days past. While this can be handled by differencing, as suggested by the stationarity for more restrictive conditions, this can also suggest that we can include lagged covariates of the response, i.e., lagged $y_t$, which we will ascertain next when looking at the auto-correlation function (ACF) plots and the partial auto-correlation function (PACF) plots. 
+
+
+\subsection{Autocorrelation and Partial Autocorrelation of Rented Biked Count, $y_t$}
+
+The ACF looks at correlation of $y_t$ with lagged versions of itself, e.g., $y_{t-k}$. The PACF differs in that it looks at correlation of $y_t$ with lagged versions of itself, e.g., $y_{t-k}$, while controlling for the intermediary lags, e.g., $\tilde{\bs{y}} = \{y_{t-1}, y_{t-2}, \dots, y_{t-k+1}\}$. From a practical standpoint, when considering PACF, we regress $y_t$ on $\tilde{\bs{y}}$ and $y_{t-k}$ on $\tilde{\bs{y}}$, and then look at the correlation of their respective residuals. 
+
+Here, We look at the ACF and PACF of $y_t$ up to 100 and 50 lags.
+
+```{r ytAcfPacf, cache = TRUE, dependson = 'data_setup', fig.cap="Autocorrelation and Partial Autocorrelation of Rented Bike Count, i.e., $y_t$", echo=FALSE}
+selfACF   = ggAcf(dat$RentedBikeCount, lag.max = 100) + labs(title=TeX("$y_t$"))
+selfPACF  = ggPacf(dat$RentedBikeCount, lag.max = 100) + labs(title=TeX("$y_t$"))
+selfACF2  = ggAcf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+selfPACF2 = ggPacf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+
+plots = list(selfACF, selfPACF, selfACF2, selfPACF2)
+gridExtra::grid.arrange(grobs = plots, ncol=2)
+```
+
+
+
+Math theory states that an AR($p$) model would have a hard cutoff to zero in the PACF plot for $h > p$, and a MA($q$) model would have a hard cutoff to zero in the ACF plot for $h > q$ [@schumway01timeseries]. From the ACF plot and seeing statistically significant autocorrelations all the way out, a simple MA($q$) model will not suffice. Looking at the PACF plot, we see a strong "cut-off" at around lag 25, suggesting an AR($25$) model. Needless to say, an AR($25$) model isn't very palatable and doesn't seem parsimonious. As such, we seemingly can't get away with a simple MA($q$) nor a simple AR($p$) model.
+
+While we can't get a simple AR($p$) or MA($q$) model, we can still use the results of the ACF and PACF plots to suggest that we need lagged values of our supervisor as additional covariates.
+
+
+\section{Feature Attributes}
+
+
+\subsection{Hourly Trend}
+
+Plot below is showing the mean hourly demand by season. It is clear that winter season has much lower demand and summer season has relatively higher demand. Hourly trend is similar in each season with two peak time per day - 8 AM and 6 PM. The hour information could be used as either qualitative or quantitative since demand is not linearly related to hour. 
+
+```{r ytHourlyBySeasons, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Hour Grouped by Seasons", echo=FALSE}
+# plotting "effect" of seasons
+dat %>% 
+  mutate(Hour = hour(Date)) %>%
+  group_by(Seasons, Hour) %>%
+  summarise(MeanRentedBikeCount = mean(RentedBikeCount), .groups="drop") %>%
+  ggplot(aes(x=Hour, y=MeanRentedBikeCount, color=Seasons)) +
+  geom_line() +
+  labs(y="Mean Rented Bike Count", x="Hour")  
+```
+
+
+\subsection{Qualitative Variables}
+
+* The plots shows more rented bike count in non-holidays than holidays except for summer (Figure 2.5).
+
+* If functional day is "no", there's no any bike rented (Figure 2.6).  
+
+* Day of week is not making significant difference in rented bike count (Figure 2.7).
+
+```{r ytBySeasonsByHoliday, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Season Grouped by Holiday", echo=FALSE}
+dat %>% 
+  ggplot(aes(x=Seasons, y=RentedBikeCount, fill=Holiday)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="Seasons") 
+```
+
+```{r ytBySeasonsByFunctionalDay, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Season Grouped by Functional Day", echo=FALSE}
+dat %>% 
+  ggplot(aes(x=Seasons, y=RentedBikeCount, fill=FunctionalDay)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="Seasons")
+```
+
+
+```{r ytByDayOfWeekBySeasons, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Day of Week Grouped by Season", echo=FALSE}
+dat$DayOfWeek <- weekdays(dat$Date)
+
+dat %>% 
+  ggplot(aes(x=DayOfWeek, y=RentedBikeCount, fill=Seasons)) + 
+  geom_boxplot() +
+  scale_fill_brewer(palette="Paired") +
+  labs(y="Rented Bike Count", x="DayOfWeek")
+```
+
+
+\subsection{Quantitative Variables}
+
+Figure 2.8 and Figure 2.9 are showing correlations between quantitative variables and demand:
+
+* The covariance matrix shows Temp, Hour has relatively higher correlation with RentedBikeCount (>0.4).
+
+* DewPointTemp and SolarRadiation have correlation greater than 0.2. 
+
+* Temp and DewPointTemp are highly correlated (0.9). 
+
+* **No clear linear relationship can be identified between response variable and quantitative Variables**
+
+```{r xtCorr, cache = TRUE, dependson = 'data_setup', fig.cap="Covariates Correlation Matrix", echo=FALSE, fig.height=5} 
+quantitative_var = c("Hour", "Temp", "Humidity", "WindSpeed", "Visibility", "DewPointTemp", 
+             "SolarRadiation", "Rainfall", "Snowfall")
+
+# check covariance  
+cor_matrix = cor(dat[c("RentedBikeCount", quantitative_var)] %>% sapply(as.numeric))
+cor_matrix2 = melt(cor_matrix)
+
+cor_matrix2 %>% 
+  ggplot(aes(x=Var1, y=Var2, fill=abs(value))) + 
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(x="", y="") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r xtCorrBySeason, cache = TRUE, dependson = 'data_setup', fig.cap="Top Four Covariates Correlation Matrix By Season", echo=FALSE, message=FALSE,fig.height=6, fig.width=8} 
+cor_matrix = cor_matrix[order(abs(cor_matrix[,1]), decreasing=TRUE),]
+
+# scatter plot matrix
+select_var = rownames(cor_matrix)[1:5]
+df_select_var = dat[select_var] %>% sapply(as.numeric) %>% data.frame
+
+df_select_var %>%
+  ggpairs(aes(colour = dat$Seasons, alpha = 0.2),
+          upper = list(continuous = wrap("cor", size = 3)))
+```
+
+
+\section{Splitting Training and Testing Data}
+
+The data set includes one year hourly bike rented count from Dec 2017 to Nov 2019. Splitting training and testing data in any anchor date will cause incomplete yearly distribution and information loss in training data. For example, there are only two days' observations for non-functional day before September 2018, which leaves little evidence for the model to identify the impact of Functional Day during training process if setting anchor date prior to September.
+
+To minimize the information loss and maximize the training data size available, the testing anchor date and time will be set no earlier than November 1, 2018:
+
+* Feature distributions are close to all year distribution (See 2.4.1 and 2.4.2).
+
+* Preliminary model testing shows the best result when using Nov 2018 data for testing (Chapter 3).
+
+\subsection{Weather Information Distribution}
+
+Figure 2.10 and 2.11 below are comparing distributions of some weather features for all observations and subset of observations before September 1, October 1 and November 1, 2018. In general, the last subset (setting anchor day at November 1, 2018) has a close enough distribution comparing the one year data set.
+
+![Caption for the picture 1.](./fig/2_feature_dist_1.png)
+*Figure 2.10 Temp, Humidity and WindSpeed Distribution*
+
+
+![Caption for the picture 2.](./fig/2_feature_dist_2.png)
+*Figure 2.11 Visibility and DewPointTemp Distribution*
+
+
+\subsection{Function Day and Holiday Distribution}
+
+Tables below are showing number of observations by category in each data set. The last data set (setting anchor day at November 1, 2018) has the closest percentage comparing to the one year data. 
+
+*Table 2.1 Number of Observations by Season*
+
+![](./fig/2_table_season.png)
+
+*Table 2.2 Number of Observations by Holidays*
+
+![](./fig/2_table_holiday.png)
+
+
+*Table 2.3 Number of Observations by Function Day*
+
+![](./fig/2_table_function.png)
+
+
+\newpage
+
+\chapter{Estimation Methods Comparison}
+
+\section{Theoretical Methodology}
+
+\subsection{Data}
+We have a collection of observations housed in a matrix $\bs{X}$ that is $\rdim{n}{p}$, i.e., $n$ observations and $p$ covariates. Further, for each observation, we have an associated supervisor value, for which all the supervisor values are housed in a column vector $\bs{y}$ that is $\rdim{n}{1}$, i.e., $n$ supervisor values for each of the $n$ associated observation. 
+
+\subsection{Risk}
+We want to use training data and different algorithms to produce a $\hat{f}: \R^p \mapsto \R$, such that we can make predictions with $\hat{f}$, i.e., $\hat{f}(\bs{X}) = \hat{y}$, where $\bs{x} \in \R^p$ and $\hat{y} \in \R$, such that $\hat{y}$ is a \say{good} prediction of $y$, the unobserved supervisor. 
+
+One way to define \say{good} is to define it in the context of \say{loss}, specifically $\ell (\hat{y}, y)$. There are a multitude of loss functions to consider, but a \say{popular} loss for regression is the squared error loss, i.e., $\ell (\hat{y}, y) = (\hat{y} - y)^2$, where deviations from the true $y$ value is penalized in a squared fashion. 
+
+We define \say{good} to be the risk for $f$, namely $R(f) = \E \ell (f(\bs{X}), \bs{Y})$, noting that $\bs{X}, \bs{Y}$ are random variables \textbf{but} $R(f)$ isn't random, due to the expectation. In practice, we can use \say{test error} as an estimate for the risk. We can also use \say{cross-validation} as another estimate for the risk as well. 
+
+\subsection{Identifying $f_*$ vs. $\hat{f}$}
+Let $f_* = \argminA_{f} R(f)$, i.e., $f_*$ has the lowest risk amongst the entire family of possible $f$. But, $f_*$ is theoretical, since we don't know the entire joint distribution of $(\bs{X}, \bs{Y})$. As such, $\hat{f}$ is our best guess of $f_*$. 
+
+\subsection{Summary}
+In short, our goal is to consider different algorithms and make the best predictions we can, as defined by jointly by our risk estimate and the embedded loss metric, squared error loss $\ell (\hat{y}, y) = (\hat{y} - y)^2$ in our case. We will estimate risk in two different ways, cross-validation to help guide our hyper-parameter selection, and \say{test error} as the final hold-out to evaluate the \say{tuned} hyper-parameters. 
+
+
+\section{Linear Methods}
+
+\subsection{Linear Regression}
+
+Let $\bs{\beta}^T, \bs{x}^T \in \R^p$, then we wish to model $y$ as $y = \bs{x}^T \bs{\beta} + \epsilon$, i.e., we want to project $y$ onto the subspace spanned by $\bs{X}$. In short, $\hat{\beta} = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2$.
+
+```{r fitLinearRegression, cache = TRUE, dependson = 'data_setup', echo=FALSE}
+set.seed(1)
+linearOut = train(x = xlFullMat, y = yl,
+                  method = "lm",
+                  trControl = trControl)
+
+yhatLinear = predict(linearOut$finalModel, xlFull) %>%
+  as.numeric()
+```
+
+```{r fitLinearRegressionResidualPlot, fig.cap="Residual Plot for Linear Regression", cache=TRUE, dependson='fitLinearRegression', echo=FALSE, fig.height=3}
+data.frame(e=yl - yhatLinear, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+
+From this residual plot, it suggests that multiple linear regression isn't appropriate for this data set. Namely, in an idealized setting, we wouldn't notice any distinct patterns in the residuals, but in this case, we see a clear increase in residual values as our estimate $\hat{y}$ gets larger. This may be due to the supervisor being count data, for which a Poisson regression or applying a square-root transform to the supervisor. 
+
+To be more specific, for us to do inference using Linear Regression, independent of prediction, we need to have $\E{\epsilon} = 0$, $\V(\epsilon)$, and $\text{Cov}(\epsilon_i, \epsilon_j) = 0$, for which all three conditions aren't satisfied. This isn't a problem specifically for us, since we care about prediction, but it does suggest model misspecification. 
+
+
+\subsection{Elastic Net}
+
+Elastic Net is an extension of Linear Regression, where we do a mixture of both of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L_2$ regularization (penalty of $||\bs{\beta}||^2_2$). Then,  $\hat{\beta}(\lambda_1, \lambda_2) = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2 + \lambda_1 ||\bs{\beta}||_1 + \lambda_2 ||\bs{\beta}||_2^2$. 
+
+Note most parameterizations of Elastic Net instead of having separate $\lambda_1$ and $\lambda_2$ have a singular $\lambda$ and a "mixing ratio" between $L_1$ and $L_2$ regularization in the form of $\alpha$. Then, $\hat{\beta}(\lambda, \alpha) = \argminA_\beta \big( ||\bs{y} - \bs{X}\bs{\beta}||^2_2 + \lambda ((1-\alpha)||\bs{\beta}||^2_2 + \alpha ||\bs{\beta}||_1) \big)$. In this parameterization, note that $\alpha=1$ results in LASSO, which has only $L_1$ regularization , and that $\alpha=0$ results in Ridge Regression, which has only $L_2$ regularization. 
+
+An open question remains though on how to choose $\alpha$, the mixture between $L_1$ and $L_2$ regularization, and $\lambda$, how much penalty to impose. For this, we can use $k$-fold cross-validation risk estimates. Namely, for a particular set of hyper-parameters we wish to consider, we can take our training data and split it into $k$ chunks, and for each chunk, we hold it out as the "test" data and learn on the remaining $k-1$ chunks (using our chosen hyper-parameters) and then evaluate on the $k^{\text{th}}$ holdout using, for example, squared error, i.e., $\sumi (y_i) - \hat{y}_i)^2$. We would then average over all $k$ risk estimatess and come up with a singular risk estimate, i.e., the cross-validation risk estimate for the hyper-parameters we used. Then, for the entire set of hyper-parameters, we'd have an associated cross-validation risk-estimate and consequently would choose the one with the lowest risk-estimate, which we're trying to minimmize.
+
+```{r fitElasticNet, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters", echo=FALSE}
+set.seed(1)
+lassoGrid = expand.grid(
+  lambda = seq(0, 1.25, length.out = 20),
+  alpha = c(0.01, 0.05, 0.25, 0.5, 0.75, 1))
+elasticOut = train(x = xlFullMat, y = yl,
+                   method="glmnet",
+                   tuneGrid = lassoGrid,
+                   trControl = trControl)
+plot(elasticOut)
+```
+
+Looking at the cross-validation risk estimates, the minimal test error is at $\hat{\alpha} = `r elasticOut$bestTune$alpha`$ and $\hat{\lambda} = `r elasticOut$bestTune$lambda`$, suggesting that we prefer minimal $L_1$ regularization ($\alpha = 0$ is strictly $L_2$ reguarlization). 
+
+Note we've run into a boundary condition, i.e., we don't know if having $\hat{lambda} > `r elasticOut$bestTune$lambda`$ will result in an even lower risk estimate. As such, we expand past the boundary and see if we can get a lower risk estimate. 
+
+```{r fitElasticNet2, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters Past Boundary Condition", echo=FALSE}
+set.seed(1)
+lassoGrid = expand.grid(
+  lambda = seq(0.75, 5, length.out = 20),
+  alpha = c(0.01))
+elasticOut = train(x = xlFullMat, y = yl,
+                   method="glmnet",
+                   tuneGrid = lassoGrid,
+                   trControl = trControl)
+plot(elasticOut)
+```
+
+Thus, the hyper-parameters that minimize the cross-validation risk estimate is  $\hat{\alpha} = `r elasticOut$bestTune$alpha`$ and $\hat{\lambda} = `r elasticOut$bestTune$lambda`$.
+
+
+```{r fitElasticNet2_yhat, cache=TRUE, dependson='fitElasticNet2', echo=FALSE}
+# Refitting with 'core' glmnet
+glmnetOut     = glmnet(x = xlFullMat, y = yl, alpha = elasticOut$bestTune$alpha)
+betaHatGlmnet = coef(glmnetOut, s = elasticOut$bestTune$lambda)
+yhatGlmnet    = predict(glmnetOut, xlFullMat, s=elasticOut$bestTune$lambda) %>%
+  as.numeric()
+```
+
+```{r fitElasticNet2ResidualPlot, cache=TRUE, dependson='fitElasticNet2', echo=FALSE, fig.height=3, fig.cap="Residual Plot for Elastic Net"}
+data.frame(e = yl-yhatGlmnet, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+
+Not surprisingly, the residual plot for Elastic Net shows similar behavior to Linear Regression, suggesting that Elastic Net isn't an appropriate model and further confirmation the linear models aren't appropriate for the problem we have. 
+
+
+\section{Non-Linear Methods}
+
+\subsection{Multivariate Adaptive Regression Splines (MARS)}
+
+Multivariate Adaptive Regression Splines (MARS), uses the linear regression framework but constructs features to model non-linearities and their interactions in an automated fashion. Specifically, in a foward-stepwise fashion, it looks over all $p$ features and a specified set of "knots" to identify the most relevant hinge feature to introduce, e.g., $)I(x_j - \kappa_0 > 0$ and $I(x_j - \kappa_0 \leq 0)$. Further, it can introduce interactive features, e.g., $I(x_j - \kappa_0 > 0) \times I(x_k - \kappa_1 \leq 0)$. MARS then uses generalized cross-validation (GCV) to determine some ideal subset of features. 
+
+As such, the number of knots (hinge points) to consider as well as the degree of interaction are hyperparameters.
+
+```{r fitMARS, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for MARS Parameters", echo=FALSE}
+set.seed(1)
+tuneGrid = expand.grid(
+  degree=1:3,                            # number of interactions
+  nprune = c(5,10,15,20,25,30, 50, 100)) # number of knots
+
+marsOut = train(x = xlFullMat, y = yl,
+                method="earth",
+                tuneGrid = tuneGrid,
+                trControl = trControl)
+plot(marsOut)
+```
+
+Here, we can see that as we increase the number of knots, the cross-validation risk estimates lower, eventually leveling off after 50 knots. Further, having interactions help, but seemingly two-way interactions are enough and three-way interactions don't buy us much.
+
+```{r fitMARS_yhat, cache=TRUE, dependson='fitMARS', echo=FALSE}
+yhatMARS = predict(marsOut$finalModel, xlFullMat) %>% as.numeric()
+```
+
+```{r fitMARSResidualPlot, cache=TRUE, dependson='fitMARS', echo=FALSE, fig.height=3, fig.cap="Residual Plot for MARS"}
+data.frame(e = yl-yhatMARS, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+Having introduced non-linearities, we're still using effectively a linear regression framework and as such, we can talk about residual plots. In this case, while there's still not random error and a clear trend, it's not as pronounced as the previous strictly linear predictors. 
+
+
+\subsection{Decision Tree}
+
+```{r fitDT, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Decision Tree Parameters", echo=FALSE}
+set.seed(1)
+tuneGrid = data.frame(cp=c(0.001, 0.0025, 0.005, 0.01, 0.05, 0.1))
+rpartOut = train(x = xlFull, y = yl,
+                 method = "rpart",
+                 tuneGrid = tuneGrid,
+                 trControl = trControl)
+plot(rpartOut)
+```
+The only hyperparmaeter of interest is "Complexity Parameter," which represents the minimum amount of improvement needed from a split in order for the split to be considered. As such, as we increase this hyperparmeter, the more pruned our tree becomes, i.e., it's not as deep. Here, we can see that as we increase this hyperparameter, the cross-validation risk-estimate is increasing. This suggests that our best tree is a fully growned decision tree and that any pruning would be detrimental. 
+
+```{r fitDT_yhat, cache=TRUE, dependson='fitDT', echo=FALSE}
+yhatDT = predict(rpartOut$finalModel, xlFull)
+```
+
+```{r fitDTResidualPlot, cache=TRUE, dependson='fitDT', echo=FALSE, fig.height=3, fig.cap="Residual Plot for Decision Tree"}
+data.frame(e = yl-yhatDT, yhat = yl) %>%
+  ggplot(aes(x=yhat, y=e)) +
+  geom_point() +
+  labs(x=TeX("$\\hat{y}$"), y=TeX("$\\hat{\\epsilon} = y - \\hat{y}$"))
+```
+
+At this point, it may not be meaningful to do in-sample residual plots due to the induced non-linearities.
+
+\subsection{Random Forest}
+
+Decision trees are perceived as low bias high variance procedures. This is to say when we permute the data set, decision trees don't necessarily generalize well. As such, we want to maintain the low bias while also lowering the variance. Bagging is an approach of using an ensemble of trees, where for each tree we bootstrap our data and the tree is fit upon that bootstrap data. The concern is that we might not get as much variance decrease as we'd like, since for a particulraly strong covariate, it might show up in every single tree, thus inducing dependency therefore limiting the variance decrease. Random Forest builds upon bagging by for each split, we only determine a subset of the covariates, typically $\sqrt{p}$, where $p$ is the number of covariates. 
+
+
+\subsection{Boosting}
+
+\newpage
+\chapter{Dependency of $Y_t$}
+
+```{r data_setup_4, cache = TRUE, message=FALSE, echo=FALSE, dependson="packages"}
+set.seed(1)
+
+load_data <- function(){
+   # Loading the Data
+   datPath = paste0(dirname(getwd()), "/data/SeoulBikeData.csv")
+   colNames = c("Date", "RentedBikeCount", "Hour", "Temp", "Humidity", 
+                "WindSpeed", "Visibility", "DewPointTemp", "SolarRadiation",
+                "Rainfall", "Snowfall", "Seasons", "Holiday", "FunctionalDay")
+   dat = read_csv(datPath, col_names = colNames, skip=1)
+   
+   # Setting up Factors
+   dat$Hour = as_factor(dat$Hour)
+   dat$Seasons = as_factor(dat$Seasons)
+   dat$Holiday = as_factor(dat$Holiday)
+   dat$FunctionalDay = as_factor(dat$FunctionalDay)
+   
+   # Creating DateTime that incorporates both Date and Hours and dropping Hour
+   dat$Date = AsDateTime(dat$Date) + hours(dat$Hour)
+   
+   # Identifying qualitative features
+   featureLevels = sapply(dat, function(x) { length(unique(x)) })
+   qualFeatures = which(featureLevels < 30)
+
+   xQuant = dat %>% select(-all_of(qualFeatures))
+   xQual  = dat %>% select(all_of(qualFeatures))
+   
+   # Creating Dummary Variables 
+   ppDummy = dummyVars(~ ., data = xQual, fullRank = TRUE)
+   xQualPost = predict(ppDummy, xQual)
+   
+   datFull = cbind(xQuant, xQualPost)
+   
+   return (datFull)
+}
+
+dat = load_data()
+
+# split into train and test, X and y
+split_data <- function(df, anchorDate = "2018/11/01"){
+   Xtot = df %>% select(-RentedBikeCount, -Date)
+   Ytot = df %>% pull(RentedBikeCount)
+   
+   # split data into train and test parts by anchor date
+   learnNdx = df$Date < anchorDate
+   
+   y_l = Ytot[learnNdx]
+   y_t = Ytot[!learnNdx]
+   x_l = Xtot[learnNdx,]
+   x_t = Xtot[!learnNdx, ]
+      
+   xl_FullMat = as.matrix(x_l)
+   xt_FullMat = as.matrix(x_t)
+   
+   colnames(xl_FullMat) <- colnames(Xtot)
+   colnames(xt_FullMat) <- colnames(Xtot)
+   
+   return(list(xlFullMat=xl_FullMat, yl=y_l, xtFullMat=xt_FullMat, yt=y_t))
+}
+
+dat_set0 = split_data(df=dat, anchorDate = "2018/11/01")
+xlFullMat=dat_set0$xlFullMat
+yl=dat_set0$yl
+xtFullMat=dat_set0$xtFullMat
+yt=dat_set0$yt
+```
+
+\section{Autocorrelation and Partial Autocorrelation of Rented Biked Count, $y_t$}
+
+In section 2.2, the ACF and PACF plots are suggesting strong autocorrelation of the past bike demand. The ACF shows a clear daily trend (every 24 lags). The hour feature used in estimators can be used to reflect this daily trend. The PACF shows significant dependence between demand and past demands - lag 1, 2, 3, 4, 5, 8, 9 ,10, etc. However, this past demand information is not well used in previous estimators. A simple way to use the information is to add dependency features of past demand.
+
+```{r ytAcfPacf2, cache = TRUE, dependson = 'data_setup_4', fig.cap="Autocorrelation and Partial Autocorrelation of Rented Bike Count, i.e., $y_t$", echo=FALSE}
+selfACF2  = ggAcf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+selfPACF2 = ggPacf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
+
+plots = list(selfACF2, selfPACF2)
+gridExtra::grid.arrange(grobs = plots, ncol=2)
+```
+
+\section{Dependency Feature}
+
+In addition to weather feature and hour feature, add dependency features for past demand: e.g., lag_1 means demand in the last hour; lag_4 means hourly demand 4 hours ago, etc. By adding dependency features, the top observations will have missing value as past demand information is not available. The obaservation with missing values will be deleted from training data. 
+
+\subsection{Estimation without Dependency Features}
+
+```{r boosting, cache = TRUE, dependson = 'data_setup_4', echo=FALSE, message=FALSE, warning=FALSE}
+nBoostingThreads = 6
+trControl = trainControl(method = "cv", number = 10)
+
+set.seed(1)
+tuneGrid = expand.grid("nrounds" = c(750),
+                       "max_depth" = c(6, 8),
+                       "eta" = c(0.01),
+                       "gamma" = 0,
+                       "colsample_bytree" = c(0.7),
+                       "min_child_weight" = 0,
+                       "subsample" = 0.75)
+
+boostOutObjSe = train(x=xlFullMat, y = yl,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl,
+                      nthread=nBoostingThreads)
+cal_test_R2 <- function(boost_Out, xtFullM, y_t){
+   yhat = predict(boost_Out, xtFullM)
+   test_R2 = 1 - sum((yhat - y_t)^2) / sum((y_t - mean(y_t))^2)
+   return (test_R2)
+}
+r2_0 = cal_test_R2(boostOutObjSe, xtFullMat, yt)
+```
+
+In previous study, boosting method brings the best result among all estimation methods. Therefore, the estimator using boosting method with parameter tuned from previous study will be used in all following model training and predictions. All observations before anchor date Nov 1, 2018 will are used for training and the 30 observations from Nov 1, 2018 to Nov 30, 2018 are used for testing.
+To compare the impact of dependency feature, model $M_0$ is fit with only weather features and hour information. The test $R^2$ in $M_0$ is `r round(r2_0, 3)`. The figure below is showing the feature importance from $M_0$, which suggesting 'Temp' as the most important features effecting the demand. 
+
+```{r boostingPlot, cache = TRUE, dependson = 'boosting', echo=FALSE, fig.cap="Feature Importance $M_0$ "}
+importance_matrix = xgb.importance(colnames(xlFullMat), model = boostOutObjSe$finalModel)
+xgb.ggplot.importance(importance_matrix, top_n=15)
+```
+
+
+\subsection{Estimation with Dependency Features}
+
+```{r add_lag, cache = TRUE, dependson = 'data_setup_4', echo=FALSE, message=FALSE}
+add_lag<-function(lag, df){
+   lag_demand = df[1:(dim(df)[1]-lag), 'RentedBikeCount']
+   fill_lag = rep(NaN, lag)
+   fill_lag = c(fill_lag, lag_demand)
+   return(fill_lag)
+}
+
+add_past_hour_demand <- function(df, past_hour_vec){
+   for (lag_hour in sort(past_hour_vec)){
+      col_name = paste0("lag_", lag_hour)
+      lag_col = add_lag(lag=lag_hour, df=df)
+      df[, col_name] = lag_col
+   }
+   df = df[complete.cases(df), ]
+   return(df)
+}
+```
+
+```{r boosting1, cache = TRUE, dependson = c('boosting','add_lag'), echo=FALSE, message=FALSE, warning=FALSE}
+dat1 = add_past_hour_demand(df=dat, past_hour_vec=c(1,2,3,4,5,8,9,10,11,12,13,15,16,17,18,19,20,21,22,23,24))
+dat_set1 = split_data(df=dat1, anchorDate = "2018/11/01")
+xlFullMat1=dat_set1$xlFullMat
+yl1=dat_set1$yl
+xtFullMat1=dat_set1$xtFullMat
+yt1=dat_set1$yt
+
+boostOutObjSe1 = train(x=xlFullMat1, y = yl1,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl,
+                      nthread=nBoostingThreads)
+r2_1 = cal_test_R2(boostOutObjSe1, xtFullMat1, yt1)
+```
+
+Based on PACF plot, dependency features within 1 day (24 hours) are selected for the model fitting, including the past 1-24 hour demand except for lag 6, 7, 14, as $M_1$. With the additional 21 columns added to X, the test $R^2$ goes up to `r round(r2_1, 3)` - a significant improvement from $M_0$. In addition, the feature importance plot for $M_1$ below shows the past demand features are more important than weather features compared with $M_0$.
+
+```{r boostingPlot1, cache = TRUE, dependson = 'boosting2', echo=FALSE, fig.cap="Feature Importance $M_1$ "}
+importance_matrix = xgb.importance(colnames(xlFullMat1), model = boostOutObjSe1$finalModel)
+xgb.ggplot.importance(importance_matrix, top_n=15)
+```
+
+\subsection{Estimation with Reduced Dependency Features}
+```{r boosting2, cache = TRUE, dependson = c('boosting','add_lag'), echo=FALSE, message=FALSE, warning=FALSE}
+dat2 = add_past_hour_demand(df=dat, past_hour_vec=c(1,2,11,16,24))
+dat_set2 = split_data(df=dat2, anchorDate = "2018/11/01")
+xlFullMat2=dat_set2$xlFullMat
+yl2=dat_set2$yl
+xtFullMat2=dat_set2$xtFullMat
+yt2=dat_set2$yt
+
+boostOutObjSe2 = train(x=xlFullMat2, y = yl2,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl,
+                      nthread = nBoostingThreads)
+r2_2 = cal_test_R2(boostOutObjSe2, xtFullMat2, yt2)
+```
+
+Based on the feature importance plot of $M_1$ and the PACF plot, the dependency features can be reset to lag 1, 2, 11, 16 and 24 to reduce the size of X variables. Thus $M_2$ is fitted with smaller number of dependency features and the test $R^2$ is `r round(r2_2, 3)`, which is less than 1% lower than $M_1$ and significant higher than $M_0$.
+
+\subsection{Estimation with Dependency Features Defined by Business Assumptions}
+```{r boosting3, cache = TRUE, dependson = c('boosting','add_lag'), echo=FALSE, message=FALSE, warning=FALSE}
+dat3 = add_past_hour_demand(df=dat, past_hour_vec=c(1,2,24,48, 24*7))
+dat_set3 = split_data(df=dat3, anchorDate = "2018/11/01")
+xlFullMat3=dat_set3$xlFullMat
+yl3=dat_set3$yl
+xtFullMat3=dat_set3$xtFullMat
+yt3=dat_set3$yt
+
+boostOutObjSe3 = train(x=xlFullMat3, y = yl3,
+                      method="xgbTree",
+                      objective="reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl,
+                      nthread = nBoostingThreads)
+r2_3 = cal_test_R2(boostOutObjSe3, xtFullMat3, yt3)
+```
+
+In $M_3$, the dependency features added is lag 1, 2, 24, 48 and 24 $\times$ 7 based on business assumptions that the demand is related to the past demands 1 and 2 hours ago, 1 day ago and 1 week ago. The test $R^2$ is `r round(r2_3, 3)`, which is as good as $M_1$ and $M_2$. 
+
+\subsection{Estimation Comparison}
+
+The table below is comparing the test $R^2$ among models with different dependency features. Considering the test accuracy and variable size, $M_2$ and $M_3$ are preferred.
+
+```{r boosting_compare, cache = TRUE, dependson = c('boosting','boosting1', 'boosting2', 'boosting3'), echo=FALSE, message=FALSE}
+r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),3))
+rownames(r2_df) <- c('No_Dependency_Feature', 'Full_Dependency_Feature', 'Reduced_Dependency_Feature', 'Business_Dependency_Feature')
+knitr::kable(r2_df, caption = "Test R2 Comparison of Models with Different Dependency Features")
+```
+
+\newpage
+\chapter{Forecasting Application}
+
+\section{Business Scenaros}
+
+The purpose to predict bike demand is to make bikes available and accessible to the public at the right time. Thus, the forecasting of hourly bike demand is required to support business decisions and operations. Based on system infrastructure capacity, we define two typical business scenarios below in real application.
+
+\subsection{Daily Data Update}
+The system data is updated on a daily base for further analysis and forecasting to the next 24 hours’ **hourly demand** is required for high-level planning of the next day. To test the performance in this business scenario, we assume the data is updated at 0:00 AM of the day and all available data at the moment is used for model training to predict the next 24 hour demands.
+
+\subsection{Real-time Data Update}
+If the system infrastructure could support real-time data update, an hourly model training could be run to predict the next **hour demand**. Any changes in the past hours could be used in the next hour demand prediction. To test the performance, the models will be trained hourly with all the data available at the moment (include demand data from last hour) and used to predict the demand in the next coming hour.
+
+```{r result_path_setup, cache = TRUE, echo=FALSE}
+datPath = paste0(dirname(getwd()), "/data/")
+Pred_Hours = seq(AsDateTime("2018/11/01")+hours(0), AsDateTime("2018/11/30")+hours(23), by="hour")
+```
+
+
+\section{Hourly Demand Forecasting with Daily Data Update}
+
+\subsection{Estimator and Dependency Features}
+
+When data is updated once every day, the latest observation available to use as dependency feature is the lag 24 for all prediction time stamps. Therefore, the smallest lag of dependency features can be added is lag 24. Based on the business assumption in dependency feature study, lag 24, 48 and 24 $\times$ 7 are added as dependency features, which represent the past demand from same hour 1 day ago, 2 days ago and 1 week ago. The model training is repeated daily for November 2018. And the forecasting method is boosting using the parameters tuned from previous study. 
+
+\subsection{Forecasting Results}
+
+In a daily data update, there are 30 repeated model training and forecasting (1 in each day). In each iteration of model training and forecasting, all observations prior to the iterator date are used as training data and the next 24 hours' hourly demands are used as testing data. The training $R^2$, mean CV $R^2$ and testing $R^2$ results are recorded in each iteration. 
+
+The table below (see Table \@ref(tab:daily_tab)) shows the average training $R^2$ over the 30 iterations is 97.7% and the average mean CV $R^2$ over the 30 iterations is 79.9%. The low average value and large std value in testing $R^2$ represents some poor prediction accuracy in some of the iterations. This can tell clearly in the figure below comparing forecasted demand and real demand (See Figure \@ref(fig:daily_fig)) - at Date Nov 3, Nov 6 and Nov 9, when there's no demand due to non-functional day, the forecasting at the beginning of the day still predicts certain amount of demand.
+
+The overall forecasting $R^2$ is calculated between all forecasted demand and real demand of the 30 iterations and will be used to compare forecasting accuracy in all scenarios. 
+
+ 
+```{r daily_tab, cache = TRUE, dependson = "result_path_setup", echo=FALSE}
+# read forecasting result daily repeat with auto-corr
+read_res_tab <- function(fn){
+   res_tab = read.table(paste0(datPath, fn),sep=",", row.names = 1, header = T)
+   res_tab['run_time', 'avg'] = res_tab['run_time', 'avg']/3600
+   res_tab = res_tab[!row.names(res_tab) %in% "run_time", ]
+   colnames(res_tab) <- c("Average", "Std")
+   rownames(res_tab) <- c("Train_R2 (per train)", "Mean_CV_R2 (per train)", "Test_R2 (per train)", "Overall_Forecasting_R2")
+   return (res_tab)
+}
+res_daily_corr = read_res_tab("output_daily_cor_sum.csv")
+knitr::kable(round(res_daily_corr,3), caption = "Foresting Result with Daily Data Update and Dependency")
+```
+```{r dailyFig, cache = TRUE, dependson = "result_path_setup", echo=FALSE, fig.cap="Forecasted Demand and Real Demand Comparison with Daily Data Update and Dependency"}
+# read forecasting result daily repeat with auto-corr
+pred_daily_corr = read.table(paste0(datPath, "output_pred_daily_cor.csv"),sep=",", row.names = 1, header = T)
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasted Hourly Demand" = "steelblue")
+pred_daily_corr %>% 
+  ggplot(aes(x=Pred_Hours)) + 
+  geom_line(aes(y=Recorded_Y_Test, color = "Real Hourly Demand")) +
+  geom_line(aes(y =Predicted_Y_Test, color="Forecasted Hourly Demand"), linetype="twodash") +
+  labs(y="Rented Bike Count", x="Date and Hour", color = "") +
+  scale_color_manual(values = colors) +
+  theme(legend.position="top")
+```
+
+
+\section{Hourly Demand Forecasting with Real-time Data Update}
+
+\subsection{Dependency Features}
+
+When the data is updated in real-time, all past demands up to one hour ago (lag 1) can be used as dependency feature. Therefore, we add the past demand from 1 hour ago, 2 hours ago, 1 day ago and 1 week ago as dependency features to the data ($M_3$ in previous study). The modeling training is repeated every hour and used to predict demand only for the coming hour. And the forecasting method is boosting using the parameters tuned from previous study.  
+
+\subsection{Forecasting Results}
+
+In the real-time data update, there are 30 $\times$ 24 repeated model training and forecasting (1 in each hour). In each iteration of model training and forecasting, all observations prior to the iterator date and hour are used as training data and the next 1 hour demands is used as testing data. As there is only 1 observation in the testing data, testing $R^2$ is not available. 
+
+The table below (see Table \@ref(tab:hourly_tab)) shows both average training $R^2$ and average mean CV $R^2$ over the 30 $\times$ 24 iterations are over 90%. The overall forecasting $R^2$ reaches 96%. And the figure comparing forecasted demand and real demand below (See Figure \@ref(fig:hourly_fig)) shows a very good match between the two curves, representing an accurate prediction. Moreover, with the real-time data update, the system is able to know the latest demand in the past hour and adjust the coming hour demand prediction - forecasted demand in Nov 3, Nov 6 and Nov 9 stays low when detecting low demand in the last hour.
+
+```{r hourly_tab, cache = TRUE, dependson = "daily_tab", echo=FALSE}
+# read forecasting result daily repeat with auto-corr
+res_hourly_corr = read_res_tab("output_hourly_cor_sum.csv")
+knitr::kable(round(res_hourly_corr,3), caption = "Foresting Result with Real-time Data Update and Dependency")
+```
+
+```{r hourlyFig, cache = TRUE, dependson = "result_path_setup", echo=FALSE, fig.cap="Forecasted Demand and Real Demand Comparison with Real-time Data Update and Dependency"}
+# read forecasting result daily repeat with auto-corr
+pred_hourly_corr = read.table(paste0(datPath, "output_pred_hourly_cor.csv"),sep=",", row.names = 1, header = T)
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasted Hourly Demand" = "steelblue")
+pred_hourly_corr %>% 
+  ggplot(aes(x=Pred_Hours)) + 
+  geom_line(aes(y=Recorded_Y_Test, color = "Real Hourly Demand")) +
+  geom_line(aes(y =Predicted_Y_Test, color="Forecasted Hourly Demand"), linetype="twodash") +
+  labs(y="Rented Bike Count", x="Date and Hour", color = "") +
+  scale_color_manual(values = colors) +
+  theme(legend.position="top")
+```
+
+
+\section{Forecasting Results Comparison}
+
+\subsection{Improvement with Real-time Data Update}
+
+If the system could support real-time data update, the overall forecasting $R^2$ shows a 10% improvement (see Table \@ref(tab:compare_tab)). Comparing the forecasted demand to real demand, the real-time data update forecasting shows a much lower discrepancies than the daily data update forecasting (See Figure \@ref(fig:compare_fig) and \@ref(fig:compare_fig1)). 
+
+```{r compare_tab, cache = TRUE, dependson = c("daily_tab", "hourly_tab"), echo=FALSE}
+compare_tab = res_daily_corr
+colnames(compare_tab) <- c("Daily Data Update with Dependency", "delete")
+compare_tab[, "Real-time Data Update with Dependency"] = res_hourly_corr$Average
+compare_tab = compare_tab %>% select(-delete)
+knitr::kable(round(compare_tab,3), caption = "Forecasting Results Comparison with Dependency")
+```
+
+```{r compareFig, cache = TRUE, dependson = c("daily_fig", "hourly_fig"), echo=FALSE, fig.cap="Forecasted Demand Comparison with Dependency"}
+compare_df = pred_daily_corr
+colnames(compare_df) = c("pred_daily_corr", "real_demand")
+compare_df$pred_hourly_corr = pred_hourly_corr$Predicted_Y_Test
+
+colors <- c("Real Demand" = "darkred", "Daily Data Update Forecasting" = "steelblue", "Real-time Data Update Forecasting" = "green4")
+
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y=real_demand, color = "Real Demand")) +
+   geom_line(aes(y =pred_daily_corr, color="Daily Data Update Forecasting"), linetype="twodash") +
+   geom_line(aes(y =pred_hourly_corr, color="Real-time Data Update Forecasting"), linetype="twodash") +
+   labs(y="Rented Bike Count", x="Date and Hour", color = "") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top")
+```
+
+```{r compareFig2, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasting Residual Comparison with Dependency"}
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y =pred_daily_corr-real_demand, color="Daily Data Update Forecasting")) +
+   geom_line(aes(y =pred_hourly_corr-real_demand, color="Real-time Data Update Forecasting")) +
+   labs(y="Forecasting Residuals", x="Date and Hour", color = " ") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top")
+```
+
+\subsection{Improvement with Dependency}
+
+To better understand the importance of dependency, the same forecasting studies (repeated model training and forecasting on daily base and hourly base) are conducted without dependency features. 
+
+The table below (see Table \@ref(tab:compare_tab2)) shows 8.5% improvement in daily data update and 14.7% improvement in real-time data update in terms of overall forecasting $R^2$. Comparing the two figures plotting forecasting residuals (See Figure \@ref(fig:compare_fig3) and \@ref(fig:compare_fig4)), there's more significant improvement by adding dependency features with real-time data update than the scenario of daily data update - the blue residual line in the second figure is much more smooth than the green line compared with the first figure. 
+
+Moreover, if the system could not support a real-time data update, using the dependency features in the daily data update scenario still brings better (4.3% higher) forecasting accuracy than a real-time data update without dependency. 
+
+```{r compare_tab2, cache = TRUE, dependson = "compare_tab", echo=FALSE}
+res_daily_no_corr = read_res_tab("output_daily_no_cor_sum.csv")
+res_hourly_no_corr = read_res_tab("output_hourly_no_cor_sum.csv")
+compare_tab[, "Daily Data Update without Dependency"] = res_daily_no_corr$Average
+compare_tab[, "Real-time Data Update without Dependency"] = res_hourly_no_corr$Average
+knitr::kable(round(compare_tab,3), caption = "Forecasting Results Comparison with and without Dependency")
+```
+
+```{r compareFig3, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Daily Data Update"}
+pred_daily_no_corr = read.table(paste0(datPath, "output_pred_daily_no_cor.csv"),sep=",", row.names = 1, header = T)
+compare_df$pred_daily_no_corr = pred_daily_no_corr$Predicted_Y_Test
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasting with Dependency" = "steelblue", "Forecasting without Dependency" = "green4")
+
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y =pred_daily_corr-real_demand, color="Forecasting with Dependency")) +
+   geom_line(aes(y =pred_daily_no_corr-real_demand, color="Forecasting without Dependency"),linetype="twodash") +
+   labs(y="Forecasting Residuals", x="Date and Hour", color = "") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top") + ylim(-1000, 1000)
+```
+
+```{r compareFig4, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Real-time Data Update"}
+pred_hourly_no_corr = read.table(paste0(datPath, "output_pred_hourly_no_cor.csv"),sep=",", row.names = 1, header = T)
+compare_df$pred_hourly_no_corr = pred_hourly_no_corr$Predicted_Y_Test
+
+colors <- c("Real Hourly Demand" = "darkred", "Forecasting with Dependency" = "steelblue", "Forecasting without Dependency" = "green4")
+
+compare_df %>% 
+   ggplot(aes(x=Pred_Hours)) + 
+   geom_line(aes(y =pred_hourly_corr-real_demand, color="Forecasting with Dependency")) +
+   geom_line(aes(y =pred_hourly_no_corr-real_demand, color="Forecasting without Dependency"),linetype="twodash") +
+   labs(y="Forecasting Residuals", x="Date and Hour", color = "") +
+   scale_color_manual(values = colors) +
+   theme(legend.position="top") + ylim(-1000, 1000)
+```
+
+
+\newpage
+\chapter{Result and Conclusion}
+
+
+
+
+
+
