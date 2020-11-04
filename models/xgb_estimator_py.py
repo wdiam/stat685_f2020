@@ -208,15 +208,22 @@ def run_repeat_forecast(data, date_list, hour_list=None, param=None):
 
 
 def printout_result(res_sum):
+    df = pd.DataFrame(columns=['avg', 'std'])
     for k, v in res_sum.items():
         infostr = f"{k}: "
         if isinstance(v, float):
             infostr += f"{v: .4f}"
+            sub_df = pd.DataFrame({'avg': v, 'std': np.nan}, index=[k])
         elif isinstance(v, list):
             infostr += f"avg {np.mean(v): .4f}; std {np.std(v): .4f}"
+            sub_df = pd.DataFrame({'avg': np.mean(v), 'std': np.std(v)}, index=[k])
         else:
             infostr += "na"
-        print(infostr)
+            sub_df = pd.DataFrame({'avg': np.nan, 'std': np.nan}, index=[k])
+
+        df = df.append(sub_df)
+
+    return df
 
 
 if __name__ == '__main__':
@@ -236,5 +243,8 @@ if __name__ == '__main__':
 
     with open(os.path.join(project_path, "data/output_daily_no_cor.json"), 'w') as fp:
         json.dump(sum_t_hourly_2, fp)
+
+    sum_t_hourly_2_df = printout_result(sum_t_hourly_2)
+    sum_t_hourly_2_df.to_csv(os.path.join(project_path, "data/output_daily_no_cor_sum.csv"))
 
     printout_result(sum_t_hourly_2)
