@@ -22,7 +22,10 @@ output:
     fig_caption: true
     includes:
       in_header: preamble.tex
-    keep_tex:  true      
+    keep_tex:  true
+    citation_package: biblatex    
+bibliography: references.bib  
+biblio-style: numeric
 documentclass: report
 fontsize: 12pt
 geometry: margin=1in 
@@ -50,6 +53,8 @@ require(e1071)
 require(latex2exp)
 require(aTSA)
 require(forecast)
+require(reshape2)
+require(GGally)
 
 theme_update(plot.title = element_text(hjust = 0.5))
 ```
@@ -184,45 +189,13 @@ The dataset contains weather information (Temperature, Humidity, Windspeed, Visi
 
 \section{Previous Work}
 
-There are two papers dealing with this data set explicitly. We're including both papers and in addition providing high level commentary on the paper and our concerns. 
+@epc20 looked at the same bike sharing data and looked at different learning algorithms on the original covariates in order to optimize prediction, using squared error as their evaluation metric. Different learning algorithms they look at include linear regression, gradient boosting machine's, support vector machines with radial basis functions, as well as xgboost. Ultimately, their best results were $R_{\text{train}}^2 = 0.96$ and $R_{\text{test}}^2 = 0.92$ using xgboost.
 
-\subsection{Paper 1: VE, Park, and Cho (2020, Computer Communications), Using Data Mining Techniques}
+@ec20 only varies marginaly from @epc20 in that they have an additional data set they consider, which they don't use as additional test data but instead run their same methodology on the Seoul bike sharing data and seeing if they get similar results. They do look at different learning algorithms, including CUBIST, random forest, CART, KNN, and conditional inference trees. 
 
-**High Level:**
+We have a deep concern with the previous work in that they don't make no reference to how they split up into 75% train and 25% test, e.g., is it randomly choose interleaved train and test or is it a specific calendar day and everything after is test and everythign prior is train? If interleaved, the the 75% training data’s distribution and 25% test data's distribution are effectively identical and learning on the train portion can be deemed “cheating” since data has leaked. 
 
-* Attempted to predict the hourly demand.
-
-* Claims .96 R^2 and .92 R^2 for train and test, respectively. 
-
-* Uses “Boruta” to identify important features, which underneath the hood uses random forest as part of the algorithm. 
-
-* Considered linear regression, GBM, SVM’s (radial basis function), boosted trees, and xgboost; had a nice mathematical summary of each. 
-
-**Thoughts/Concerns**
-
-* Didn't consider L1 Regularization, i.e., LASSO, which seems the most obvious for feature importance/selection/ranking. For example, do the full path as we go over $\lambda$ and see the order they get dropped, where the sooner they drop the less important they are.
-
-* Make no reference to how they split up into 75% train and 25% test, e.g., is it interleave of a specific calendar day and everything after is post? If interleaved, the the 75% train’s distribution and 25% test’s distribution are effectively identical and learning on the train portion is considered “cheating” since data has leaked. 
-
-* Didn't consider non-linear transforms of the data, which may not be that important given the usage of decision trees, but could have allowed plain linear regression to perform better.
-
-
-\subsection{Paper 2: VE and Cho (2020, European Journal of Remote Sensing), A Rule-Based Model}
-
-**High Level**
-
-* Consider CUBIST, regularized random forest, CART, KNN, Conditional Inference Tree.
-
-* Almost identical to previous paper. 
-
-* They had an additional data source, the “Capital Bikeshare program,” for which the dataset came from Kaggle. It didn’t seem that they used this in an “interesting” way (interleaving the data, using it as a validation) but instead just considered it as another data source for which they ran their same methodology and if they got the same R^2 and other metrics, then they'd consider that would be successful. 
-
-**Thoughts/Concerns**
-
-* Still don’t talk about train/test split methodology. 
-
-* The last bullet point of high level thoughts. 
-
+Also, from a learning methodology, they don't consider $L_1$ regularization directly when using linear regression. Further, they don't consider non-linear transforms of the data, which may not be that important given the usage of decision trees, but could have allowed plain linear regression to perform better.
 
 \section{Scope and Goal}
 
@@ -319,9 +292,9 @@ gridExtra::grid.arrange(grobs = plots, ncol=2)
 
 
 
-Math theory states that an AR($p$) model would have a hard cutoff to zero in the PACF plot for $h > p$, and a MA($q$) model would have a hard cutoff to zero in the ACF plot for $h > q$. From the ACF plot and seeing statistically significant autocorrelations all the way out, a simple MA($q$) model will not suffice. Looking at the PACF plot, we see a strong "cut-off" at around lag 25, suggesting an AR($25$) model. Needless to say, an AR($25$) model isn't very palatable and doesn't seem parsimonious. As such, we seemingly can't get away with a simple MA($q$) nor a simple AR($p$) model.
+Math theory states that an AR($p$) model would have a hard cutoff to zero in the PACF plot for $h > p$, and a MA($q$) model would have a hard cutoff to zero in the ACF plot for $h > q$ [@schumway01timeseries]. From the ACF plot and seeing statistically significant autocorrelations all the way out, a simple MA($q$) model will not suffice. Looking at the PACF plot, we see a strong "cut-off" at around lag 25, suggesting an AR($25$) model. Needless to say, an AR($25$) model isn't very palatable and doesn't seem parsimonious. As such, we seemingly can't get away with a simple MA($q$) nor a simple AR($p$) model.
 
-While we can't get a simple AR($p) or MA($q$) model, we can still use the results of the ACF and PACF plots to suggest that we need lagged values of our supervisor as additional covariates.
+While we can't get a simple AR($p$) or MA($q$) model, we can still use the results of the ACF and PACF plots to suggest that we need lagged values of our supervisor as additional covariates.
 
 
 \section{Feature Attributes}
@@ -341,9 +314,6 @@ dat %>%
   geom_line() +
   labs(y="Mean Rented Bike Count", x="Hour")  
 ```
-
-
-
 
 
 \subsection{Qualitative Variables}
@@ -394,12 +364,33 @@ Figure 2.8 and Figure 2.9 are showing correlations between quantitative variable
 
 * **No clear linear relationship can be identified between response variable and quantitative Variables**
 
-![Caption for the picture.](./fig/2_cor_matrix.png)
-*Figure 2.8 Variable Correlation Matrix*
+```{r xt_corr, cache = TRUE, dependson = 'data_setup', fig.cap="Covariates Correlation Matrix", echo=FALSE, fig.height=5} 
+quantitative_var = c("Hour", "Temp", "Humidity", "WindSpeed", "Visibility", "DewPointTemp", 
+             "SolarRadiation", "Rainfall", "Snowfall")
 
+# check covariance  
+cor_matrix = cor(dat[c("RentedBikeCount", quantitative_var)] %>% sapply(as.numeric))
+cor_matrix2 = melt(cor_matrix)
 
-![Caption for the picture.](./fig/2_cor_matrix_scatter.png)
-*Figure 2.9 Top 4 Variable Correlation Matrix*
+cor_matrix2 %>% 
+  ggplot(aes(x=Var1, y=Var2, fill=abs(value))) + 
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(x="", y="") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r xt_corr_byseason, cache = TRUE, dependson = 'data_setup', fig.cap="Top Four Covariates Correlation Matrix By Season", echo=FALSE, message=FALSE,fig.height=6, fig.width=8} 
+cor_matrix = cor_matrix[order(abs(cor_matrix[,1]), decreasing=TRUE),]
+
+# scatter plot matrix
+select_var = rownames(cor_matrix)[1:5]
+df_select_var = dat[select_var] %>% sapply(as.numeric) %>% data.frame
+
+df_select_var %>%
+  ggpairs(aes(colour = dat$Seasons, alpha = 0.2),
+          upper = list(continuous = wrap("cor", size = 3)))
+```
 
 
 \section{Splitting Training and Testing Data}
@@ -664,6 +655,9 @@ Testing data setting:
 
 \newpage
 \chapter{Result and Conclusion}
+
+\newpage
+\chapter{References}
 
 
 
