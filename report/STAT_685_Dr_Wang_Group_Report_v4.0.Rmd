@@ -56,6 +56,7 @@ require(forecast)
 require(reshape2)
 require(GGally)
 require(Ckmeans.1d.dp)
+require(kableExtra)
 
 theme_update(plot.title = element_text(hjust = 0.5))
 ```
@@ -241,7 +242,7 @@ Features of the data are,
 
 \section{Time Series Data}
 
-Fundamentally, our data is time-series data (Figure 2.1). As such, let $y_t$ be the time series we're working to model, i.e., Seoul's bike sharing data. 
+Fundamentally, our data is time-series data (Figure \@ref(fig:ytDataPlot)). As such, let $y_t$ be the time series we're working to model, i.e., Seoul's bike sharing data. 
 
 ```{r ytDataPlot, cache = TRUE, dependson = 'data_setup', fig.cap="Hourly Rented Bike Count Over Entire Time Period", echo=FALSE}
 dat %>% 
@@ -319,11 +320,11 @@ dat %>%
 
 \subsection{Qualitative Variables}
 
-* The plots shows more rented bike count in non-holidays than holidays except for summer (Figure 2.5).
+* The plots shows more rented bike count in non-holidays than holidays except for summer (Figure \@ref(fig:ytBySeasonsByHoliday)).
 
-* If functional day is "no", there's no any bike rented (Figure 2.6).  
+* If functional day is "no", there's no any bike rented (Figure \@ref(fig:ytBySeasonsByFunctionalDay)).  
 
-* Day of week is not making significant difference in rented bike count (Figure 2.7).
+* Day of week is not making significant difference in rented bike count (Figure \@ref(fig:ytByDayOfWeekBySeasons)).
 
 ```{r ytBySeasonsByHoliday, cache = TRUE, dependson = 'data_setup', fig.cap="Rented Bike Count by Season Grouped by Holiday", echo=FALSE}
 dat %>% 
@@ -355,7 +356,8 @@ dat %>%
 
 \subsection{Quantitative Variables}
 
-Figure 2.8 and Figure 2.9 are showing correlations between quantitative variables and demand:
+
+Figure \@ref(fig:xtCorr) and Figure \@ref(fig:xtCorrBySeason) are showing correlations between quantitative variables and demand:
 
 * The covariance matrix shows Temp, Hour has relatively higher correlation with RentedBikeCount (>0.4).
 
@@ -824,7 +826,7 @@ In $M_3$, the dependency features added is lag 1, 2, 24, 48 and 24 $\times$ 7 ba
 
 The table below is comparing the test $R^2$ among models with different dependency features. Considering the test accuracy and variable size, $M_2$ and $M_3$ are preferred.
 
-```{r boosting_compare, cache = TRUE, dependson = c('boosting','boosting1', 'boosting2', 'boosting3'), echo=FALSE, message=FALSE}
+```{r boostingCompare, cache = TRUE, dependson = c('boosting','boosting1', 'boosting2', 'boosting3'), echo=FALSE, message=FALSE, fig.cap="Test R2 Comparison of Models with Different Dependency Features"}
 r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),3))
 rownames(r2_df) <- c('No_Dependency_Feature', 'Full_Dependency_Feature', 'Reduced_Dependency_Feature', 'Business_Dependency_Feature')
 knitr::kable(r2_df, caption = "Test R2 Comparison of Models with Different Dependency Features")
@@ -859,12 +861,12 @@ When data is updated once every day, the latest observation available to use as 
 
 In a daily data update, there are 30 repeated model training and forecasting (1 in each day). In each iteration of model training and forecasting, all observations prior to the iterator date are used as training data and the next 24 hours' hourly demands are used as testing data. The training $R^2$, mean CV $R^2$ and testing $R^2$ results are recorded in each iteration. 
 
-The table below (see Table \@ref(tab:daily_tab)) shows the average training $R^2$ over the 30 iterations is 97.7% and the average mean CV $R^2$ over the 30 iterations is 79.9%. The low average value and large std value in testing $R^2$ represents some poor prediction accuracy in some of the iterations. This can tell clearly in the figure below comparing forecasted demand and real demand (See Figure \@ref(fig:daily_fig)) - at Date Nov 3, Nov 6 and Nov 9, when there's no demand due to non-functional day, the forecasting at the beginning of the day still predicts certain amount of demand.
+The table below (see Table \@ref(tab:dailyTab)) shows the average training $R^2$ over the 30 iterations is 97.7% and the average mean CV $R^2$ over the 30 iterations is 79.9%. The low average value and large std value in testing $R^2$ represents some poor prediction accuracy in some of the iterations. This can tell clearly in the figure below comparing forecasted demand and real demand (See Figure \@ref(fig:dailyFig)) - at Date Nov 3, Nov 6 and Nov 9, when there's no demand due to non-functional day, the forecasting at the beginning of the day still predicts certain amount of demand.
 
 The overall forecasting $R^2$ is calculated between all forecasted demand and real demand of the 30 iterations and will be used to compare forecasting accuracy in all scenarios. 
 
  
-```{r daily_tab, cache = TRUE, dependson = "result_path_setup", echo=FALSE}
+```{r dailyTab, cache = TRUE, dependson = "result_path_setup", echo=FALSE}
 # read forecasting result daily repeat with auto-corr
 read_res_tab <- function(fn){
    res_tab = read.table(paste0(datPath, fn),sep=",", row.names = 1, header = T)
@@ -902,9 +904,9 @@ When the data is updated in real-time, all past demands up to one hour ago (lag 
 
 In the real-time data update, there are 30 $\times$ 24 repeated model training and forecasting (1 in each hour). In each iteration of model training and forecasting, all observations prior to the iterator date and hour are used as training data and the next 1 hour demands is used as testing data. As there is only 1 observation in the testing data, testing $R^2$ is not available. 
 
-The table below (see Table \@ref(tab:hourly_tab)) shows both average training $R^2$ and average mean CV $R^2$ over the 30 $\times$ 24 iterations are over 90%. The overall forecasting $R^2$ reaches 96%. And the figure comparing forecasted demand and real demand below (See Figure \@ref(fig:hourly_fig)) shows a very good match between the two curves, representing an accurate prediction. Moreover, with the real-time data update, the system is able to know the latest demand in the past hour and adjust the coming hour demand prediction - forecasted demand in Nov 3, Nov 6 and Nov 9 stays low when detecting low demand in the last hour.
+The table below (see Table \@ref(tab:hourlyTab)) shows both average training $R^2$ and average mean CV $R^2$ over the 30 $\times$ 24 iterations are over 90%. The overall forecasting $R^2$ reaches 96%. And the figure comparing forecasted demand and real demand below (See Figure \@ref(fig:hourlyFig)) shows a very good match between the two curves, representing an accurate prediction. Moreover, with the real-time data update, the system is able to know the latest demand in the past hour and adjust the coming hour demand prediction - forecasted demand in Nov 3, Nov 6 and Nov 9 stays low when detecting low demand in the last hour.
 
-```{r hourly_tab, cache = TRUE, dependson = "daily_tab", echo=FALSE}
+```{r hourlyTab, cache = TRUE, dependson = "daily_tab", echo=FALSE}
 # read forecasting result daily repeat with auto-corr
 res_hourly_corr = read_res_tab("output_hourly_cor_sum.csv")
 knitr::kable(round(res_hourly_corr,3), caption = "Foresting Result with Real-time Data Update and Dependency")
@@ -929,9 +931,9 @@ pred_hourly_corr %>%
 
 \subsection{Improvement with Real-time Data Update}
 
-If the system could support real-time data update, the overall forecasting $R^2$ shows a 10% improvement (see Table \@ref(tab:compare_tab)). Comparing the forecasted demand to real demand, the real-time data update forecasting shows a much lower discrepancies than the daily data update forecasting (See Figure \@ref(fig:compare_fig) and \@ref(fig:compare_fig1)). 
+If the system could support real-time data update, the overall forecasting $R^2$ shows a 10% improvement (see Table \@ref(tab:compareTab)). Comparing the forecasted demand to real demand, the real-time data update forecasting shows a much lower discrepancies than the daily data update forecasting (See Figure \@ref(fig:compareFig) and \@ref(fig:compareFig2)). 
 
-```{r compare_tab, cache = TRUE, dependson = c("daily_tab", "hourly_tab"), echo=FALSE}
+```{r compareTab, cache = TRUE, dependson = c("daily_tab", "hourly_tab"), echo=FALSE}
 compare_tab = res_daily_corr
 colnames(compare_tab) <- c("Daily Data Update with Dependency", "delete")
 compare_tab[, "Real-time Data Update with Dependency"] = res_hourly_corr$Average
@@ -956,7 +958,7 @@ compare_df %>%
    theme(legend.position="top")
 ```
 
-```{r compareFig2, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasting Residual Comparison with Dependency"}
+```{r compareFig2, cache = TRUE, dependson = "compareFig", echo=FALSE, fig.cap="Forecasting Residual Comparison with Dependency"}
 compare_df %>% 
    ggplot(aes(x=Pred_Hours)) + 
    geom_line(aes(y =pred_daily_corr-real_demand, color="Daily Data Update Forecasting")) +
@@ -970,11 +972,11 @@ compare_df %>%
 
 To better understand the importance of dependency, the same forecasting studies (repeated model training and forecasting on daily base and hourly base) are conducted without dependency features. 
 
-The table below (see Table \@ref(tab:compare_tab2)) shows 8.5% improvement in daily data update and 14.7% improvement in real-time data update in terms of overall forecasting $R^2$. Comparing the two figures plotting forecasting residuals (See Figure \@ref(fig:compare_fig3) and \@ref(fig:compare_fig4)), there's more significant improvement by adding dependency features with real-time data update than the scenario of daily data update - the blue residual line in the second figure is much more smooth than the green line compared with the first figure. 
+The table below (see Table \@ref(tab:compareTab2)) shows 8.5% improvement in daily data update and 14.7% improvement in real-time data update in terms of overall forecasting $R^2$. Comparing the two figures plotting forecasting residuals (See Figure \@ref(fig:compareFig3) and \@ref(fig:compareFig4)), there's more significant improvement by adding dependency features with real-time data update than the scenario of daily data update - the blue residual line in the second figure is much more smooth than the green line compared with the first figure. 
 
 Moreover, if the system could not support a real-time data update, using the dependency features in the daily data update scenario still brings better (4.3% higher) forecasting accuracy than a real-time data update without dependency. 
 
-```{r compare_tab2, cache = TRUE, dependson = "compare_tab", echo=FALSE}
+```{r compareTab2, cache = TRUE, dependson = "compareTab", echo=FALSE}
 res_daily_no_corr = read_res_tab("output_daily_no_cor_sum.csv")
 res_hourly_no_corr = read_res_tab("output_hourly_no_cor_sum.csv")
 compare_tab[, "Daily Data Update without Dependency"] = res_daily_no_corr$Average
@@ -982,7 +984,7 @@ compare_tab[, "Real-time Data Update without Dependency"] = res_hourly_no_corr$A
 knitr::kable(round(compare_tab,3), caption = "Forecasting Results Comparison with and without Dependency")
 ```
 
-```{r compareFig3, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Daily Data Update"}
+```{r compareFig3, cache = TRUE, dependson = "compareFig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Daily Data Update"}
 pred_daily_no_corr = read.table(paste0(datPath, "output_pred_daily_no_cor.csv"),sep=",", row.names = 1, header = T)
 compare_df$pred_daily_no_corr = pred_daily_no_corr$Predicted_Y_Test
 
@@ -997,7 +999,7 @@ compare_df %>%
    theme(legend.position="top") + ylim(-1000, 1000)
 ```
 
-```{r compareFig4, cache = TRUE, dependson = "compare_fig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Real-time Data Update"}
+```{r compareFig4, cache = TRUE, dependson = "compareFig", echo=FALSE, fig.cap="Forecasted Demand Comparison with Real-time Data Update"}
 pred_hourly_no_corr = read.table(paste0(datPath, "output_pred_hourly_no_cor.csv"),sep=",", row.names = 1, header = T)
 compare_df$pred_hourly_no_corr = pred_hourly_no_corr$Predicted_Y_Test
 
