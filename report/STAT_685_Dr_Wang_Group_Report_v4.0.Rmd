@@ -17,6 +17,7 @@ header-includes:
    - \pagenumbering{gobble}
 output: 
   bookdown::pdf_document2:
+    toc_depth: 4
     latex_engine: xelatex
     number_sections: true
     fig_caption: true
@@ -25,7 +26,7 @@ output:
     keep_tex:  true
     citation_package: biblatex    
 bibliography: references.bib  
-biblio-style: numeric
+biblio-style: authoryear
 documentclass: report
 fontsize: 12pt
 geometry: margin=1in 
@@ -448,7 +449,7 @@ We have a collection of observations housed in a matrix $\bs{X}$ that is $\rdim{
 \subsection{Risk}
 We want to use training data and different algorithms to produce a $\hat{f}: \R^p \mapsto \R$, such that we can make predictions with $\hat{f}$, i.e., $\hat{f}(\bs{X}) = \hat{y}$, where $\bs{x} \in \R^p$ and $\hat{y} \in \R$, such that $\hat{y}$ is a \say{good} prediction of $y$, the unobserved supervisor. 
 
-One way to define \say{good} is to define it in the context of \say{loss}, specifically $\ell (\hat{y}, y)$. There are a multitude of loss functions to consider, but a \say{popular} loss for regression is the squared error loss, i.e., $\ell (\hat{y}, y) = (\hat{y} - y)^2$, where deviations from the true $y$ value is penalized in a squared fashion. 
+One way to define \say{good} is to define it in the context of \say{loss}, specifically $\ell (\hat{y}, y)$. There are a multitude of loss functions to consider, but a {popular loss for regression is the squared error loss, i.e., $\ell (\hat{y}, y) = (\hat{y} - y)^2$, where deviations from the true $y$ value is penalized in a squared fashion. 
 
 We define \say{good} to be the risk for $f$, namely $R(f) = \E \ell (f(\bs{X}), \bs{Y})$, noting that $\bs{X}, \bs{Y}$ are random variables \textbf{but} $R(f)$ isn't random, due to the expectation. In practice, we can use \say{test error} as an estimate for the risk. We can also use \say{cross-validation} as another estimate for the risk as well. 
 
@@ -456,14 +457,14 @@ We define \say{good} to be the risk for $f$, namely $R(f) = \E \ell (f(\bs{X}), 
 Let $f_* = \argminA_{f} R(f)$, i.e., $f_*$ has the lowest risk amongst the entire family of possible $f$. But, $f_*$ is theoretical, since we don't know the entire joint distribution of $(\bs{X}, \bs{Y})$. As such, $\hat{f}$ is our best guess of $f_*$. 
 
 \subsection{Summary}
-In short, our goal is to consider different algorithms and make the best predictions we can, as defined by jointly by our risk estimate and the embedded loss metric, squared error loss $\ell (\hat{y}, y) = (\hat{y} - y)^2$ in our case. We will estimate risk in two different ways, cross-validation to help guide our hyper-parameter selection, and \say{test error} as the final hold-out to evaluate the \say{tuned} hyper-parameters. 
+In short, our goal is to consider different algorithms and make the best predictions we can, as defined by jointly by our risk estimate and the embedded loss metric, squared error loss $\ell (\hat{y}, y) = (\hat{y} - y)^2$ in our case. We will estimate risk in two different ways, cross-validation to help guide our hyperparameter selection, and \say{test error} as the final hold-out to evaluate the \say{tuned} hyper-parameters. 
 
 
 \section{Linear Methods}
 
 \subsection{Linear Regression}
 
-Let $\bs{\beta}^T, \bs{x}^T \in \R^p$, then we wish to model $y$ as $y = \bs{x}^T \bs{\beta} + \epsilon$, i.e., we want to project $y$ onto the subspace spanned by $\bs{X}$. In short, $\hat{\beta} = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2$.
+Let $\bs{\beta}^T, \bs{x}^T \in \R^p$, then we wish to model $y$ as $y = \bs{x}^T \bs{\beta} + \epsilon$, i.e., we want to project $y$ onto the subspace spanned by $\bs{X}$. In short, $\hat{\beta} = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2$ [@sheather01regression].
 
 ```{r fitLinearRegression, cache = TRUE, dependson = 'data_setup', echo=FALSE}
 set.seed(1)
@@ -489,13 +490,11 @@ To be more specific, for us to do inference using Linear Regression, independent
 
 \subsection{Elastic Net}
 
-Elastic Net is an extension of Linear Regression, where we do a mixture of both of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L_2$ regularization (penalty of $||\bs{\beta}||^2_2$). Then,  $\hat{\beta}(\lambda_1, \lambda_2) = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2 + \lambda_1 ||\bs{\beta}||_1 + \lambda_2 ||\bs{\beta}||_2^2$. 
+From @Zou05regularizationand, Elastic Net is an extension of Linear Regression, where we do a mixture of both of both $L_1$ regularization (penalty of $||\bs{\beta}||_1$) and $L_2$ regularization (penalty of $||\bs{\beta}||^2_2$). Then,  $\hat{\beta}(\lambda_1, \lambda_2) = \argminA_\beta ||\bs{y} - \bs{X} \bs{\beta}||^2_2 + \lambda_1 ||\bs{\beta}||_1 + \lambda_2 ||\bs{\beta}||_2^2$. Note, another parameterization is having a singular $\lambda$ and a "mixing ratio" between $L_1$ and $L_2$ regularization in the form of $\alpha$. Then, $\hat{\beta}(\lambda, \alpha) = \argminA_\beta \big( ||\bs{y} - \bs{X}\bs{\beta}||^2_2 + \lambda ((1-\alpha)||\bs{\beta}||^2_2 + \alpha ||\bs{\beta}||_1) \big)$. In this parameterization, note that $\alpha=1$ results in LASSO, which has only $L_1$ regularization , and that $\alpha=0$ results in Ridge Regression, which has only $L_2$ regularization. 
 
-Note most parameterizations of Elastic Net instead of having separate $\lambda_1$ and $\lambda_2$ have a singular $\lambda$ and a "mixing ratio" between $L_1$ and $L_2$ regularization in the form of $\alpha$. Then, $\hat{\beta}(\lambda, \alpha) = \argminA_\beta \big( ||\bs{y} - \bs{X}\bs{\beta}||^2_2 + \lambda ((1-\alpha)||\bs{\beta}||^2_2 + \alpha ||\bs{\beta}||_1) \big)$. In this parameterization, note that $\alpha=1$ results in LASSO, which has only $L_1$ regularization , and that $\alpha=0$ results in Ridge Regression, which has only $L_2$ regularization. 
+An open question remains though on how to choose $\alpha$, the mixture between $L_1$ and $L_2$ regularization, and $\lambda$, how much penalty to impose. For this, we can choose hyperparameters with the lowest $k$-fold cross-validation risk estimates [@Efron04theestimation].
 
-An open question remains though on how to choose $\alpha$, the mixture between $L_1$ and $L_2$ regularization, and $\lambda$, how much penalty to impose. For this, we can use $k$-fold cross-validation risk estimates. Namely, for a particular set of hyper-parameters we wish to consider, we can take our training data and split it into $k$ chunks, and for each chunk, we hold it out as the "test" data and learn on the remaining $k-1$ chunks (using our chosen hyper-parameters) and then evaluate on the $k^{\text{th}}$ holdout using, for example, squared error, i.e., $\sumi (y_i) - \hat{y}_i)^2$. We would then average over all $k$ risk estimatess and come up with a singular risk estimate, i.e., the cross-validation risk estimate for the hyper-parameters we used. Then, for the entire set of hyper-parameters, we'd have an associated cross-validation risk-estimate and consequently would choose the one with the lowest risk-estimate, which we're trying to minimmize.
-
-```{r fitElasticNet, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters", echo=FALSE}
+```{r fitElasticNet, cache = TRUE, dependson = 'data_setup', echo=FALSE}
 set.seed(1)
 lassoGrid = expand.grid(
   lambda = seq(0, 1.25, length.out = 20),
@@ -504,14 +503,21 @@ elasticOut = train(x = xlFullMat, y = yl,
                    method="glmnet",
                    tuneGrid = lassoGrid,
                    trControl = trControl)
-plot(elasticOut)
+```
+
+```{r fitElasticNetTrainPlot, cache = TRUE, dependson = 'fitElasticNet', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyperparameters", echo=FALSE, message=FALSE}
+title1 = TeX("Mixing Percentage ($\\alpha$)")
+ggplot(elasticOut, highlight = TRUE) +
+   labs(x=TeX("Regularization Parameter ($\\lambda$)")) +
+   scale_color_discrete(name=title1) +
+   scale_shape_discrete(name=title1)
 ```
 
 Looking at the cross-validation risk estimates, the minimal test error is at $\hat{\alpha} = `r elasticOut$bestTune$alpha`$ and $\hat{\lambda} = `r elasticOut$bestTune$lambda`$, suggesting that we prefer minimal $L_1$ regularization ($\alpha = 0$ is strictly $L_2$ reguarlization). 
 
 Note we've run into a boundary condition, i.e., we don't know if having $\hat{lambda} > `r elasticOut$bestTune$lambda`$ will result in an even lower risk estimate. As such, we expand past the boundary and see if we can get a lower risk estimate. 
 
-```{r fitElasticNet2, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyper Parameters Past Boundary Condition", echo=FALSE}
+```{r fitElasticNet2, cache = TRUE, dependson = 'data_setup', echo=FALSE}
 set.seed(1)
 lassoGrid = expand.grid(
   lambda = seq(0.75, 5, length.out = 20),
@@ -520,10 +526,14 @@ elasticOut = train(x = xlFullMat, y = yl,
                    method="glmnet",
                    tuneGrid = lassoGrid,
                    trControl = trControl)
-plot(elasticOut)
 ```
 
-Thus, the hyper-parameters that minimize the cross-validation risk estimate is  $\hat{\alpha} = `r elasticOut$bestTune$alpha`$ and $\hat{\lambda} = `r elasticOut$bestTune$lambda`$.
+```{r fitElasticNet2TrainPlot, cache = TRUE, dependson = 'fitElasticNet2', fig.cap="Cross-Validation Risk Estimates for Elastic Net Hyperparameters Past Boundary Condition", echo=FALSE, message=FALSE}
+ggplot(elasticOut, highlight = TRUE) +
+   labs(x=TeX("Regularization Parameter ($\\lambda$)"))
+```
+
+Thus, the hyper-parameters that minimize the cross-validation risk estimate is  $\hat{\alpha} = `r elasticOut$bestTune$alpha`$ and $\hat{\lambda} = `r round(elasticOut$bestTune$lambda, 2)`$.
 
 
 ```{r fitElasticNet2_yhat, cache=TRUE, dependson='fitElasticNet2', echo=FALSE}
@@ -548,11 +558,11 @@ Not surprisingly, the residual plot for Elastic Net shows similar behavior to Li
 
 \subsection{Multivariate Adaptive Regression Splines (MARS)}
 
-Multivariate Adaptive Regression Splines (MARS), uses the linear regression framework but constructs features to model non-linearities and their interactions in an automated fashion. Specifically, in a foward-stepwise fashion, it looks over all $p$ features and a specified set of "knots" to identify the most relevant hinge feature to introduce, e.g., $)I(x_j - \kappa_0 > 0$ and $I(x_j - \kappa_0 \leq 0)$. Further, it can introduce interactive features, e.g., $I(x_j - \kappa_0 > 0) \times I(x_k - \kappa_1 \leq 0)$. MARS then uses generalized cross-validation (GCV) to determine some ideal subset of features. 
+Per @Friedman91multivariateadaptive, Multivariate Adaptive Regression Splines (MARS) uses the linear regression framework but constructs features to model non-linearities and their interactions in an automated fashion. Specifically, in a foward-stepwise fashion, it looks over all $p$ covariates and a specified set of "knots" to identify the most relevant hinge feature to introduce, e.g., $I(x_j - \kappa_0 > 0$ and $I(x_j - \kappa_0 \leq 0)$. Further, it can introduce interactive features, e.g., $I(x_j - \kappa_0 > 0) \times I(x_k - \kappa_1 \leq 0)$. MARS then uses generalized cross-validation (GCV) to determine some ideal subset of features. 
 
-As such, the number of knots (hinge points) to consider as well as the degree of interaction are hyperparameters.
+As such, the number of knots to consider as well as the degree of interaction are the hyperparameters for MARS.
 
-```{r fitMARS, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for MARS Parameters", echo=FALSE}
+```{r fitMARS, cache = TRUE, dependson = 'data_setup', echo=FALSE}
 set.seed(1)
 tuneGrid = expand.grid(
   degree=1:3,                            # number of interactions
@@ -562,10 +572,17 @@ marsOut = train(x = xlFullMat, y = yl,
                 method="earth",
                 tuneGrid = tuneGrid,
                 trControl = trControl)
-plot(marsOut)
 ```
 
-Here, we can see that as we increase the number of knots, the cross-validation risk estimates lower, eventually leveling off after 50 knots. Further, having interactions help, but seemingly two-way interactions are enough and three-way interactions don't buy us much.
+```{r fitMARSPlot, cache = TRUE, dependson = 'fitMARS', fig.cap="Cross-Validation Risk Estimates for MARS Hyperparameters", echo=FALSE, message=FALSE}
+title1 = TeX("Degree of Interaction")
+ggplot(marsOut, highlight = TRUE) +
+   labs(x=TeX("Number of Knots")) +
+   scale_color_discrete(name=title1) +
+   scale_shape_discrete(name=title1)
+```
+
+Here, we can see that as we increase the number of knots, the cross-validation risk estimates lower, eventually leveling off after 50 knots. Further, having interactions help, but there seem to be diminishing return as there's not a large difference between allowing 3-way interactions relative to 2-way interactions. 
 
 ```{r fitMARS_yhat, cache=TRUE, dependson='fitMARS', echo=FALSE}
 yhatMARS = predict(marsOut$finalModel, xlFullMat) %>% as.numeric()
@@ -579,19 +596,27 @@ data.frame(e = yl-yhatMARS, yhat = yl) %>%
 ```
 Having introduced non-linearities, we're still using effectively a linear regression framework and as such, we can talk about residual plots. In this case, while there's still not random error and a clear trend, it's not as pronounced as the previous strictly linear predictors. 
 
-
 \subsection{Decision Tree}
 
-```{r fitDT, cache = TRUE, dependson = 'data_setup', fig.cap="Cross-Validation Risk Estimates for Decision Tree Parameters", echo=FALSE}
+Per @wires11, Decision Tree is an umbrella term for machine learning methods that recursively partitions the data and fits a simple prediction model at each partition, for which the results can be viewed as a decision tree. We specifically use a variant of CART [@cart001], which imposes a `cp`, complexity parameter, effectively specifying a minimal amount of improvement needed for each split, thus saving later tree pruning that is part of CART's regular routine [@rpart]. 
+
+As such, the only hyperparmeter we have to consider is `cp`. 
+
+```{r fitDT, cache = TRUE, dependson = 'data_setup', echo=FALSE}
 set.seed(1)
-tuneGrid = data.frame(cp=c(0.001, 0.0025, 0.005, 0.01, 0.05, 0.1))
+tuneGrid = data.frame(cp=c(0, 0.001, 0.0025, 0.005, 0.01, 0.05, 0.1))
 rpartOut = train(x = xlFull, y = yl,
                  method = "rpart",
                  tuneGrid = tuneGrid,
                  trControl = trControl)
-plot(rpartOut)
 ```
-The only hyperparmaeter of interest is "Complexity Parameter," which represents the minimum amount of improvement needed from a split in order for the split to be considered. As such, as we increase this hyperparmeter, the more pruned our tree becomes, i.e., it's not as deep. Here, we can see that as we increase this hyperparameter, the cross-validation risk-estimate is increasing. This suggests that our best tree is a fully growned decision tree and that any pruning would be detrimental. 
+
+```{r fitDTPlot, cache = TRUE, dependson = 'fitDT', fig.cap="Cross-Validation Risk Estimates for Decision Tree Hyperparameters", echo=FALSE}
+ggplot(rpartOut, highlight = TRUE) +
+   labs(x=TeX("Complexity Parameter (cp)")) 
+```
+
+Here, we can see that as we increase the hyperparameter `cp`, the cross-validation risk-estimate is increasing. This suggests that our best tree is a fully growned decision tree and that any pre-pruning with `cp` would be detrimental. 
 
 ```{r fitDT_yhat, cache=TRUE, dependson='fitDT', echo=FALSE}
 yhatDT = predict(rpartOut$finalModel, xlFull)
@@ -608,10 +633,77 @@ At this point, it may not be meaningful to do in-sample residual plots due to th
 
 \subsection{Random Forest}
 
-Decision trees are perceived as low bias high variance procedures. This is to say when we permute the data set, decision trees don't necessarily generalize well. As such, we want to maintain the low bias while also lowering the variance. Bagging is an approach of using an ensemble of trees, where for each tree we bootstrap our data and the tree is fit upon that bootstrap data. The concern is that we might not get as much variance decrease as we'd like, since for a particulraly strong covariate, it might show up in every single tree, thus inducing dependency therefore limiting the variance decrease. Random Forest builds upon bagging by for each split, we only determine a subset of the covariates, typically $\sqrt{p}$, where $p$ is the number of covariates. 
+Random Forest is an ensemble of trees, where for each tree we use a bootstrap of our original data and further for each decision node for that tree, we only consider a subset of covariates, e.g., $\sqrt{p}$. The motivation for Random Forest is that Decision Trees are low bias high variance procedures and by doing the aforementioned approach, we're able to maintain the bias but lower the variance [@Breiman01randomforests]. 
 
+We fix the number of trees in the ensemble to be $500$, and the hyperparameters we consider are `mtry`, which specifies the number of covariates to use, and `min.node.size`, which specifies the minimum amount of observations in a terminal node. 
+
+
+```{r fitRf, cache = TRUE, dependson = 'data_setup', echo=FALSE}
+set.seed(1)
+tuneGrid = expand.grid(splitrule="variance",
+                       mtry = round(ncol(xlFullMat) ** c(0.25, 0.5, 0.75, 0.9, 0.95)),
+                       min.node.size = round(nrow(xlFullMat) * c(0.0001, 0.001, 0.01)))
+rangerOut = train(x = xlFullMat, y = yl,
+                  method = "ranger",
+                  tuneGrid = tuneGrid,
+                  num.trees = 500,
+                  trControl = trControl)
+```
+
+```{r fitRfPlot, cache = TRUE, dependson = 'fitRf', fig.cap="Cross-Validation Risk Estimates for Random Forest Hyperparameters", echo=FALSE, message=FALSE}
+title1 = TeX("Minimal Node Size")
+ggplot(rangerOut, highlight = TRUE) +
+   labs(x=TeX("Number of Randomly Selected Covariates (mtry)")) +
+   scale_color_discrete(name=title1) +
+   scale_shape_discrete(name=title1)
+```
+
+Thus, the hyper-parameters that minimize the cross-validation risk estimate is  $\texttt{mtry} = `r rangerOut$bestTune$mtry`$ and $\texttt{min.node.size} = `r rangerOut$bestTune$min.node.size`$. 
+
+```{r fitRf_yhat, cache=TRUE, dependson='fitRf', echo=FALSE}
+yhatRf = predict(rangerOut, xlFull)
+```
 
 \subsection{Boosting}
+
+From @Friedman98additivelogistic, Boosting is a forward stagewise additive model in a set of elementary \say{basis} functions, e.g., weak classifiers $G_m(\bs{x}) \in \{-1,1\}$. Mathematically, we can frame this as $f(\bs{x}) = \sum_{b=1}^B \beta_b b(\bs{x}; \gamma_m)$, where $\beta_m$ are the expansion coefficients, and $b(\bs{x};\gamma) \in \R$ are simple functions of multivariate argument $\bs{x}$ and characterized by $\gamma$ [@hastie01statisticallearning]. 
+
+XGBoost is a popular implementation of Boosting that also extends it to be computationally faster as well as more scaleable, across multiple cores as well as multiple computers [@Chen16xgboost]. 
+
+Assuming we use a decision tree as our \say{basis} function, hyperparmeters we consider are how many rounds of boosting (`nrounds`), the maximum depth of the tree (`max_depth`), and what fraction of covariates to consider per tree (`colsample_bytree`), similar to Random Forest. 
+
+```{r fitBoosting, cache = TRUE, dependson = 'data_setup', echo=FALSE, message=FALSE, warning=FALSE}
+nBoostingThreads = 6
+
+set.seed(1)
+tuneGrid = expand.grid("nrounds" = c(100, 150, 200, 300, 400, 500, 750),
+                       "max_depth" = c(1, 2, 4, 6, 8),
+                       "eta" = c(0.01),
+                       "gamma" = 0,
+                       "colsample_bytree" = c(.5, .75, 1),
+                       "min_child_weight" = 0,
+                       "subsample" = 0.5)
+
+boostOutObjSe = train(x=xlFullMat, y = yl,
+                      method="xgbTree",
+                      objective = "reg:squarederror",
+                      tuneGrid = tuneGrid,
+                      trControl = trControl,
+                      nthread=nBoostingThreads)
+```
+
+```{r fitBoostingPlot, cache = TRUE, dependson = 'fitBoosting', fig.cap="Cross-Validation Risk Estimates for Boosting Hyperparameters", echo=FALSE, message=FALSE}
+k = ggplot(boostOutObjSe, highlight = TRUE) +
+   labs(x="Number of Boosting Iterations", title="Column Subsampling by Tree") +
+   theme(plot.title = element_text(size=11.5))
+k
+```
+
+Thus, the hyper-parameters that minimize the cross-validation risk estimate is  $\texttt{nrounds} = `r boostOutObjSe$bestTune$nrounds`$, $\texttt{max\_depth} = `r boostOutObjSe$bestTune$max_depth`$, and $\texttt{colsample\_bytree} = `r boostOutObjSe$bestTune$colsample_bytree`$. That being said, the big driver is `max_depth`, i.e., the inverse relationship between cross-validated risk estimate and `max_depth` suggests having increasingly non-linear interactions are helpful. 
+
+```{r fitBoosting_yhat, cache=TRUE, dependson='fitBoosting', echo=FALSE}
+yhatBoost = predict(boostOutObjSe, xlFullMat)
+```
 
 \newpage
 \chapter{Dependency of $Y_t$}
@@ -702,7 +794,6 @@ In addition to weather feature and hour feature, add dependency features for pas
 \subsection{Estimation without Dependency Features}
 
 ```{r boosting, cache = TRUE, dependson = 'data_setup_4', echo=FALSE, message=FALSE, warning=FALSE}
-nBoostingThreads = 6
 trControl = trainControl(method = "cv", number = 10)
 
 set.seed(1)
