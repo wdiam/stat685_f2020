@@ -22,3 +22,5 @@
 /models/STAT685-001-*
 /models/STAT685-002-*
 /models/STAT685-004-*
+/report/*.log
+/report/*.tex
