@@ -920,7 +920,7 @@ In $M_3$, the dependency features added is lag 1, 2, 24, 48 and 24 $\times$ 7 ba
 The table below is comparing the test $R^2$ among models with different dependency features. Considering the test accuracy and variable size, $M_2$ and $M_3$ are preferred.
 
 ```{r boostingCompare, cache = TRUE, dependson = c('boosting','boosting1', 'boosting2', 'boosting3'), echo=FALSE, message=FALSE, fig.cap="Test R2 Comparison of Models with Different Dependency Features"}
-r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),3))
+r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),p3))
 rownames(r2_df) <- c('No_Dependency_Feature', 'Full_Dependency_Feature', 'Reduced_Dependency_Feature', 'Business_Dependency_Feature')
 knitr::kable(r2_df, caption = "Test R2 Comparison of Models with Different Dependency Features")
 ```
@@ -999,7 +999,7 @@ In the real-time data update, there are 30 $\times$ 24 repeated model training a
 
 The table below (see Table \@ref(tab:hourlyTab)) shows both train $R^2$ and average mean CV $R^2$ over the 30 $\times$ 24 iterations are above 90%. The test $R^2$ reaches 96%. And the figure comparing forecast demand and real demand below (See Figure \@ref(fig:hourlyFig)) shows a very good match between the two curves, representing an accurate prediction. Moreover, with the real-time data update, the system is able to know the latest demand in the past hour and adjust the coming hour demand prediction - forecast demand in Nov 3, Nov 6 and Nov 9 stays low when detecting low demand in the previous hours.
 
-```{r hourlyTab, cache = TRUE, dependson = "daily_tab", echo=FALSE}
+```{r hourlyTab, cache = TRUE, dependson = "dailyTab", echo=FALSE}
 # read forecasting result daily repeat with auto-corr
 res_hourly_corr = read_res_tab("output_hourly_cor_sum.csv")
 knitr::kable(round(res_hourly_corr,3), caption = "Foresting Result with Real-time Data Update and Dependency")
@@ -1026,12 +1026,12 @@ pred_hourly_corr %>%
 
 If the system could support real-time data update, the test $R^2$ shows a 10% improvement (see Table \@ref(tab:compareTab)). Comparing the forecast demand to real demand, the real-time data update forecasting shows a much lower discrepancies than the daily data update forecasting (See Figure \@ref(fig:compareFig) and \@ref(fig:compareFig2)). 
 
-```{r compareTab, cache = TRUE, dependson = c("daily_tab", "hourly_tab"), echo=FALSE}
+```{r compareTab, cache = TRUE, dependson = c("dailyTab", "hourlyTab"), echo=FALSE}
 compare_tab = data.frame("DailyDataUpdate"=t(res_daily_corr), "Real-timeDataUpdate"=t(res_hourly_corr))
 knitr::kable(round(compare_tab,3), caption = "Forecasting Results Comparison with Dependency")
 ```
 
-```{r compareFig, cache = TRUE, dependson = c("daily_fig", "hourly_fig"), echo=FALSE, fig.cap="Forecasted Demand Comparison with Dependency"}
+```{r compareFig, cache = TRUE, dependson = c("dailyFig", "hourlyFig"), echo=FALSE, fig.cap="Forecasted Demand Comparison with Dependency"}
 compare_df = pred_daily_corr
 colnames(compare_df) = c("pred_daily_corr", "real_demand")
 compare_df$pred_hourly_corr = pred_hourly_corr$Predicted_Y_Test
