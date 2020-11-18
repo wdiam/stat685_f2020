@@ -403,41 +403,51 @@ df_select_var %>%
 
 The data set includes one year hourly bike rented count from Dec 2017 to Nov 2019. Splitting training and testing data in any anchor date will cause incomplete yearly distribution and information loss in training data. For example, there are only two days' observations for non-functional day before September 2018, which leaves little evidence for the model to identify the impact of Functional Day during training process if setting anchor date prior to September.
 
-To minimize the information loss and maximize the training data size available, the testing anchor date and time will be set no earlier than November 1, 2018:
-
-* Feature distributions are close to all year distribution (See 2.4.1 and 2.4.2).
-
-* Preliminary model testing shows the best result when using Nov 2018 data for testing (Chapter 3).
+To minimize the information loss and maximize the training data size available, the testing anchor date and time will be set no earlier than November 1, 2018, where training data feature distributions are close to all year distribution (See 2.4.1 and 2.4.2).
 
 \subsection{Weather Information Distribution}
 
-Figure 2.10 and 2.11 below are comparing distributions of some weather features for all observations and subset of observations before September 1, October 1 and November 1, 2018. In general, the last subset (setting anchor day at November 1, 2018) has a close enough distribution comparing the one year data set.
+Figure \@ref(fig:distFig1) and \@ref(fig:distFig2) below are comparing distributions of some weather features for all observations and subset of observations before September 1, October 1 and November 1, 2018. In general, the last subset (setting anchor day at November 1, 2018) has a close enough distribution comparing the one year data set.
 
-![Caption for the picture 1.](./fig/2_feature_dist_1.png)
-*Figure 2.10 Temp, Humidity and WindSpeed Distribution*
+```{r distFig1, fig.align = 'center', out.width = "90%", fig.cap = "Temp, Humidity and WindSpeed Distribution", cache = TRUE, dependson = 'data_setup',echo=FALSE, message=FALSE,fig.height=6, fig.width=8}
+knitr::include_graphics("./fig/2_feature_dist_1.png")
+```
 
-
-![Caption for the picture 2.](./fig/2_feature_dist_2.png)
-*Figure 2.11 Visibility and DewPointTemp Distribution*
-
+```{r distFig2, fig.align = 'center', out.width = "90%", fig.cap = "Visibility and DewPointTemp Distribution",cache = TRUE, dependson = 'data_setup',echo=FALSE, message=FALSE, fig.height=4, fig.width=8}
+knitr::include_graphics("./fig/2_feature_dist_2.png")
+```
 
 \subsection{Function Day and Holiday Distribution}
 
-Tables below are showing number of observations by category in each data set. The last data set (setting anchor day at November 1, 2018) has the closest percentage comparing to the one year data. 
+Tables (\@ref(tab:distTab1), \@ref(tab:distTab2) and \@ref(tab:distTab3)) are showing number of observations by category in each data set. The last data set (setting anchor day at November 1, 2018) has the closest percentage comparing to the one year data. 
 
-*Table 2.1 Number of Observations by Season*
+```{r distTab1, cache = TRUE, echo=FALSE, message=FALSE}
+dist_df1 = data.frame(all_year=c(0.25, 0.25, 0.25, 0.25), 
+                      before_Sept=c(0.34, 0.34, NaN, 0.33),
+                      before_Oct=c(0.3, 0.3, 0.1, 0.3),
+                      before_Noc=c(0.27, 0.27, 0.18, 0.27))
+rownames(dist_df1) <- c("Spring", "Summer", "Autumn", "Winter")
+knitr::kable(dist_df1, caption = "Percentage of Observations by Season")
+```
 
-![](./fig/2_table_season.png)
 
-*Table 2.2 Number of Observations by Holidays*
+```{r distTab2, cache = TRUE, echo=FALSE, message=FALSE}
+dist_df2 = data.frame(all_year=c(0.95, 0.05), 
+                      before_Sept=c(0.95, 0.05),
+                      before_Oct=c(0.95, 0.05),
+                      before_Noc=c(0.95, 0.05))
+rownames(dist_df2) <- c("No Holiday", "Holiday")
+knitr::kable(dist_df2, caption = "Percentage of Observations by Holidays")
+```
 
-![](./fig/2_table_holiday.png)
-
-
-*Table 2.3 Number of Observations by Function Day*
-
-![](./fig/2_table_function.png)
-
+```{r distTab3, cache = TRUE, echo=FALSE, message=FALSE}
+dist_df3 = data.frame(all_year=c(0.97, 0.03), 
+                      before_Sept=c(0.99, 0.01),
+                      before_Oct=c(0.98, 0.02),
+                      before_Noc=c(0.97, 0.03))
+rownames(dist_df3) <- c("Function Day", "Non-Function Day")
+knitr::kable(dist_df3, caption = "Percentage of Observations by Function Days")
+```
 
 \newpage
 
