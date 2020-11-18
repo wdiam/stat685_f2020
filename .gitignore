@@ -24,3 +24,4 @@
 /models/STAT685-004-*
 /report/*.log
 /report/*.tex
+/report/*.pdf
