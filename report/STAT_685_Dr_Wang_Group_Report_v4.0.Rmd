@@ -920,7 +920,8 @@ In $M_3$, the dependency features added is lag 1, 2, 24, 48 and 24 $\times$ 7 ba
 The table below is comparing the test $R^2$ among models with different dependency features. Considering the test accuracy and variable size, $M_2$ and $M_3$ are preferred.
 
 ```{r boostingCompare, cache = TRUE, dependson = c('boosting','boosting1', 'boosting2', 'boosting3'), echo=FALSE, message=FALSE, fig.cap="Test R2 Comparison of Models with Different Dependency Features"}
-r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),p3))
+#r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),p3))
+r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3)))
 rownames(r2_df) <- c('No_Dependency_Feature', 'Full_Dependency_Feature', 'Reduced_Dependency_Feature', 'Business_Dependency_Feature')
 knitr::kable(r2_df, caption = "Test R2 Comparison of Models with Different Dependency Features")
 ```
