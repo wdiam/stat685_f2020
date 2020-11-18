@@ -779,7 +779,7 @@ yt=dat_set0$yt
 
 \section{Autocorrelation and Partial Autocorrelation of Rented Biked Count, $y_t$}
 
-In section 2.2, the ACF and PACF plots are suggesting strong autocorrelation of the past bike demand. The ACF shows a clear daily trend (every 24 lags). The hour feature used in estimators can be used to reflect this daily trend. The PACF shows significant dependence between demand and past demands - lag 1, 2, 3, 4, 5, 8, 9 ,10, etc. However, this past demand information is not well used in previous estimators. A simple way to use the information is to add dependency features of past demand.
+In section 2.2, the ACF and PACF plots are suggesting strong autocorrelation of the past bike demand. The ACF shows a clear daily trend (every 24 lags). The hour feature used in estimators can be used to reflect this daily trend. The PACF shows significant dependence between demand and past demands - lag 1, 2, 3, 4, 5, 8, 9 ,10, etc. (See Figure \@ref(fig:ytAcfPacf2)). However, this past demand information is not well used in previous estimators. A simple way to use the information is to add dependency features of past demand.
 
 ```{r ytAcfPacf2, cache = TRUE, dependson = 'data_setup_4', fig.cap="Autocorrelation and Partial Autocorrelation of Rented Bike Count, i.e., $y_t$", echo=FALSE}
 selfACF2  = ggAcf(dat$RentedBikeCount, lag.max = 50) + labs(title=TeX("$y_t$"))
@@ -791,7 +791,7 @@ gridExtra::grid.arrange(grobs = plots, ncol=2)
 
 \section{Dependency Feature}
 
-In addition to weather feature and hour feature, add dependency features for past demand: e.g., lag_1 means demand in the last hour; lag_4 means hourly demand 4 hours ago, etc. By adding dependency features, the top observations will have missing value as past demand information is not available. The obaservation with missing values will be deleted from training data. 
+In addition to weather feature and hour feature, dependency features for past demand are added: e.g., lag_1 means demand in the last hour; lag_4 means hourly demand 4 hours ago, etc. By adding dependency features, the top observations will have missing value as past demand information is not available. The observations with missing values will be deleted from training data. 
 
 \subsection{Estimation without Dependency Features}
 
@@ -822,7 +822,7 @@ r2_0 = cal_test_R2(boostOutObjSe, xtFullMat, yt)
 ```
 
 In previous study, boosting method brings the best result among all estimation methods. Therefore, the estimator using boosting method with parameter tuned from previous study will be used in all following model training and predictions. All observations before anchor date Nov 1, 2018 will are used for training and the 30 observations from Nov 1, 2018 to Nov 30, 2018 are used for testing.
-To compare the impact of dependency feature, model $M_0$ is fit with only weather features and hour information. The test $R^2$ in $M_0$ is `r round(r2_0, 3)`. The figure below is showing the feature importance from $M_0$, which suggesting 'Temp' as the most important features effecting the demand. 
+To compare the impact of dependency feature, model $M_0$ is fitted with only weather features and hour information. The test $R^2$ in $M_0$ is `r round(r2_0, 3)`. The figure below (Figure \@ref(fig:boostingPlot)) is showing the feature importance of $M_0$, which suggests 'Temp' as the most important features effecting the demand. 
 
 ```{r boostingPlot, cache = TRUE, dependson = 'boosting', echo=FALSE, fig.cap="Feature Importance $M_0$ "}
 importance_matrix = xgb.importance(colnames(xlFullMat), model = boostOutObjSe$finalModel)
@@ -868,7 +868,7 @@ boostOutObjSe1 = train(x=xlFullMat1, y = yl1,
 r2_1 = cal_test_R2(boostOutObjSe1, xtFullMat1, yt1)
 ```
 
-Based on PACF plot, dependency features within 1 day (24 hours) are selected for the model fitting, including the past 1-24 hour demand except for lag 6, 7, 14, as $M_1$. With the additional 21 columns added to X, the test $R^2$ goes up to `r round(r2_1, 3)` - a significant improvement from $M_0$. In addition, the feature importance plot for $M_1$ below shows the past demand features are more important than weather features compared with $M_0$.
+Based on PACF plot (Figure \@ref(fig:ytAcfPacf2)), dependency features within 1 day (24 hours) are selected for the model fitting, including the past 1-24 hour demand except for lag 6, 7, 14, as $M_1$. With the additional 21 columns added to X, the test $R^2$ goes up to `r round(r2_1, 3)` - a significant improvement from $M_0$. In addition, the feature importance plot (Figure \@ref(fig:boostingPlot1)) for $M_1$ below shows the past demand features are more important than weather features compared with $M_0$.
 
 ```{r boostingPlot1, cache = TRUE, dependson = 'boosting2', echo=FALSE, fig.cap="Feature Importance $M_1$ "}
 importance_matrix = xgb.importance(colnames(xlFullMat1), model = boostOutObjSe1$finalModel)
@@ -893,7 +893,7 @@ boostOutObjSe2 = train(x=xlFullMat2, y = yl2,
 r2_2 = cal_test_R2(boostOutObjSe2, xtFullMat2, yt2)
 ```
 
-Based on the feature importance plot of $M_1$ and the PACF plot, the dependency features can be reset to lag 1, 2, 11, 16 and 24 to reduce the size of X variables. Thus $M_2$ is fitted with smaller number of dependency features and the test $R^2$ is `r round(r2_2, 3)`, which is less than 1% lower than $M_1$ and significant higher than $M_0$.
+Based on the feature importance plot (Figure \@ref(fig:boostingPlot1)) of $M_1$ and the PACF plot (Figure \@ref(fig:ytAcfPacf2)), the dependency features can be reset to lag 1, 2, 11, 16 and 24 to reduce the size of X variables. Thus $M_2$ is fitted with smaller number of dependency features and the test $R^2$ is `r round(r2_2, 3)`, which is less than 1% lower than $M_1$ and significant higher than $M_0$.
 
 \subsection{Estimation with Dependency Features Defined by Business Assumptions}
 ```{r boosting3, cache = TRUE, dependson = c('boosting','add_lag'), echo=FALSE, message=FALSE, warning=FALSE}
@@ -913,11 +913,11 @@ boostOutObjSe3 = train(x=xlFullMat3, y = yl3,
 r2_3 = cal_test_R2(boostOutObjSe3, xtFullMat3, yt3)
 ```
 
-In $M_3$, the dependency features added is lag 1, 2, 24, 48 and 24 $\times$ 7 based on business assumptions that the demand is related to the past demands 1 and 2 hours ago, 1 day ago and 1 week ago. The test $R^2$ is `r round(r2_3, 3)`, which is as good as $M_1$ and $M_2$. 
+In $M_3$, the dependency features added is lag 1, 2, 24, 48 and 24 $\times$ 7 based on business assumptions that the demand is related to the past demands 1 and 2 hours ago, 1 day and 2 days ago and 1 week ago. The test $R^2$ is `r round(r2_3, 3)`, which is as good as $M_1$ and $M_2$. 
 
 \subsection{Estimation Comparison}
 
-The table below is comparing the test $R^2$ among models with different dependency features. Considering the test accuracy and variable size, $M_2$ and $M_3$ are preferred.
+Table \@ref(tab:boostingCompare) is comparing the test $R^2$ among models with different dependency features. Considering the test accuracy and variable size, $M_2$ and $M_3$ are preferred.
 
 ```{r boostingCompare, cache = TRUE, dependson = c('boosting','boosting1', 'boosting2', 'boosting3'), echo=FALSE, message=FALSE, fig.cap="Test R2 Comparison of Models with Different Dependency Features"}
 r2_df = data.frame(Model=c('M0','M1','M2','M3'), TestR2 = round(c(r2_0, r2_1, r2_2, r2_3),3))
