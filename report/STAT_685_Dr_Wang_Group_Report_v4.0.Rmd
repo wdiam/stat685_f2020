@@ -1,7 +1,5 @@
 ---
-title: "STAT 685: Dr. Suojin Wang's Group"
-subtitle: |
-  | Modeling Seoul Bike Sharing Demand
+title: "Modeling Seoul Bike Sharing Demand"
 author: "Nam Tran, Bai Zou"
 date: \today
 header-includes:
@@ -197,8 +195,8 @@ Also, from a learning methodology, they don't consider $L_1$ regularization dire
 
 Initially, we consider two business requirements:
 
-1. Predict next day hourly demand based on historical data until the current day.
-2. Real-time prediction for next hour demand based on historical data until the current hour.
+1. Predict next day hourly demand based on historical data up to the current day.
+2. Real-time prediction for next hour demand based on historical data up to the current hour.
 
 Further, we also consider:
 
@@ -677,7 +675,7 @@ yhatRf = predict(rangerOut, xlFull)
 
 \subsubsection{Boosting} \label{boostinghyperparameters}
 
-From @Friedman98additivelogistic, Boosting is a forward stagewise additive model in a set of elementary \say{basis} functions, e.g., weak classifiers $G_m(\bs{x}) \in \{-1,1\}$. Mathematically, we can frame this as $f(\bs{x}) = \sum_{b=1}^B \beta_b b(\bs{x}; \gamma_m)$, where $\beta_m$ are the expansion coefficients, and $b(\bs{x};\gamma) \in \R$ are simple functions of multivariate argument $\bs{x}$ and characterized by $\gamma$ [@hastie01statisticallearning]. 
+From @Friedman98additivelogistic, Boosting is a forward stagewise additive model in a set of elementary \say{basis} functions, e.g., weak classifiers $G_m(\bs{x}) \in \{-1,1\}$. Mathematically, we can frame this as $f(\bs{x}) = \sum_{b=1}^B \beta_b b(\bs{x}; \gamma_b)$, where $\beta$'s are the expansion coefficients, and $b(\bs{x};\gamma) \in \R$ are simple functions of multivariate argument $\bs{x}$ and characterized by $\gamma$ [@hastie01statisticallearning]. 
 
 XGBoost is a popular implementation of Boosting that also extends it to be computationally faster as well as more scaleable, across multiple cores as well as multiple computers [@Chen16xgboost]. 
 
